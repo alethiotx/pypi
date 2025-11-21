@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alethiotx"
-version = "1.0.1"
+version = "1.0.2"
 description = "Alethio Therapeutics Python Toolkit"
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -24,7 +24,8 @@ dependencies = [
     "matplotlib",
     "setuptools",
     "fsspec",
-    "s3fs"
+    "s3fs",
+    "upsetplot"
 ]
 
 [project.urls]

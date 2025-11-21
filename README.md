@@ -93,6 +93,28 @@ print(f"Mean AUC: {sum(scores)/len(scores):.3f}")
 mean_auc = roc_curve(result['X'], result['y_binary'], n_splits=5, classifier='rf')
 ```
 
+### 5. Visualize Gene Overlaps with UpSet Plots
+
+```python
+from alethiotx.artemis import prepare_upset, create_upset_plot
+
+# Load clinical scores or pathway genes for multiple diseases
+breast, lung, prostate, melanoma, bowel, diabetes, cardio = load_clinical_scores()
+
+# Prepare data for UpSet plot (mode='ct' for clinical targets)
+upset_data = prepare_upset(breast, lung, prostate, melanoma, bowel, diabetes, cardio, mode='ct')
+
+# Create and display the UpSet plot
+plot = create_upset_plot(upset_data, min_subset_size=5)
+plot.plot()
+
+# For pathway genes, use mode='pg'
+breast_pg, lung_pg, prostate_pg, melanoma_pg, bowel_pg, diabetes_pg, cardio_pg = load_pathway_genes(n=100)
+upset_data_pg = prepare_upset(breast_pg, lung_pg, prostate_pg, melanoma_pg, bowel_pg, diabetes_pg, cardio_pg, mode='pg')
+plot_pg = create_upset_plot(upset_data_pg, min_subset_size=10)
+plot_pg.plot()
+```
+
 ## Supported Disease Indications (Artemis Module)
 
 The Artemis module includes built-in support for:
@@ -130,6 +152,11 @@ The Artemis module includes built-in support for:
 - `pre_model()` - Prepare datasets for ML model training
 - `cv_pipeline()` - Cross-validation pipeline with customizable classifiers
 
+### Visualization
+
+- `prepare_upset()` - Prepare disease-related data for UpSet plot visualization
+- `create_upset_plot()` - Create UpSet plots for visualizing gene set intersections across diseases
+
 ## Data Storage (Artemis Module)
 
 The Artemis module uses AWS S3 for storing pre-computed data:
@@ -150,6 +177,9 @@ s3://alethiotx-artemis/data/
 - numpy
 - matplotlib
 - setuptools
+- fsspec
+- s3fs
+- upsetplot
 
 ## Documentation
 

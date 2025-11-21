@@ -6,3 +6,4 @@ matplotlib
 setuptools
 fsspec
 s3fs
+upsetplot
