@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alethiotx"
+version = "1.0.0"
+description = "Alethio Therapeutics Python Toolkit"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [{name = "Vladimir Kiselev", email = "vlad.kiselev@alethiomics.com"}]
+keywords = ["alethiotx", "artemis"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent"
+]
+requires-python = ">=3.9"
+dependencies = [
+    "requests",
+    "scikit-learn",
+    "pandas",
+    "numpy",
+    "matplotlib",
+    "setuptools",
+]
+
+[project.urls]
+Homepage = "https://github.com/alethiotx/pypi"
+Issues = "https://github.com/alethiotx/pypi/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
