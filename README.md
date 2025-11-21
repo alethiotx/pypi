@@ -44,13 +44,13 @@ pip install alethiotx
 from alethiotx.artemis import trials, drugbank, drugscores
 
 # Query clinical trials for a specific indication
-breast_trials = trials(search='Breast Cancer', last_6_years=True)
+breast_trials = get_clinical_trials(search='Breast Cancer', last_6_years=True)
 
 # Match trials with DrugBank to get target information
 db_data = drugbank(breast_trials)
 
 # Calculate clinical development scores
-scores = drugscores(db_data, include_approved=True)
+scores = get_clinical_scores(db_data, include_approved=True)
 print(scores.head())
 ```
 
@@ -66,14 +66,14 @@ breast, lung, prostate, melanoma, bowel, diabetes, cardio = load_clinical_scores
 ### 3. Pathway Gene Analysis
 
 ```python
-from alethiotx.artemis import get_pathway_genes, geneshot
-
-# Get top pathway genes for diseases
-breast_pg, lung_pg, prostate_pg, melanoma_pg, bowel_pg, diabetes_pg, cardio_pg = get_pathway_genes(n=100)
+from alethiotx.artemis import get_pathway_genes load_pathway_genes
 
 # Query GeneShot for disease-associated genes
-aml_genes = geneshot("acute myeloid leukemia")
+aml_genes = get_pathway_genes("acute myeloid leukemia")
 print(aml_genes.loc["FLT3", ["gene_count", "rank"]])
+
+# Get top pathway genes for diseases
+breast_pg, lung_pg, prostate_pg, melanoma_pg, bowel_pg, diabetes_pg, cardio_pg = load_pathway_genes(n=100)
 ```
 
 ### 4. Machine Learning Pipeline
@@ -110,12 +110,12 @@ The Artemis module includes built-in support for:
 
 ### Data Loading & Processing
 
-- `trials()` - Retrieve clinical trials from ClinicalTrials.gov
+- `get_clinical_trials()` - Retrieve clinical trials from ClinicalTrials.gov
 - `drugbank()` - Match trials with DrugBank drug/target data
-- `drugscores()` - Calculate per-target clinical development scores
-- `geneshot()` - Query Ma'ayan Lab's GeneShot API for gene associations
+- `get_clinical_scores()` - Calculate per-target clinical development scores
 - `load_clinical_scores()` - Load pre-computed clinical scores from S3
-- `get_pathway_genes()` - Retrieve pathway gene data
+- `get_pathway_genes()` - Query Ma'ayan Lab's GeneShot API for gene associations
+- `load_pathway_genes()` - Retrieve pathway gene data
 
 ### Data Preparation
 
@@ -129,7 +129,6 @@ The Artemis module includes built-in support for:
 
 - `pre_model()` - Prepare datasets for ML model training
 - `cv_pipeline()` - Cross-validation pipeline with customizable classifiers
-- `roc_curve()` - Generate ROC curves with k-fold cross-validation
 
 ## Data Storage (Artemis Module)
 

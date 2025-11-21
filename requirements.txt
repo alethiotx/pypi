@@ -1,0 +1,8 @@
+requests
+scikit-learn
+pandas
+numpy
+matplotlib
+setuptools
+fsspec
+s3fs

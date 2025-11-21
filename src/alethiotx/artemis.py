@@ -1,86 +1,62 @@
-"""
-alethiotx_artemis.kg
-====================
-
-This module provides utilities for loading clinical and pathway gene score data from S3,
-preparing modeling datasets, filtering overlapping genes, and running cross-validation pipelines
-for drug target prediction.
-
-Functions
----------
-
-Data Loading
-~~~~~~~~~~~~
-.. autosummary::
-    load_clinical_scores
-    get_pathway_genes
-
-Target Processing
-~~~~~~~~~~~~~~~~~
-.. autosummary::
-    get_all_targets
-    cut_clinical_scores
-    find_overlapping_genes
-    uniquify_clinical_scores
-    uniquify_pathway_genes
-
-Model Preparation and Evaluation
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-.. autosummary::
-    pre_model
-    cv_pipeline
-    roc_curve
-
-Notes
------
-This module is designed to work with clinical target data and pathway gene data
-stored in S3 buckets with date-based directory structures.
-
-Examples
---------
->>> # Load clinical scores for different disease areas
->>> breast, lung, prostate, melanoma, bowel, diabetes, cardio = load_clinical_scores()
->>> 
->>> # Get all unique target genes
->>> all_targets = get_all_targets([breast, lung, prostate])
->>> 
->>> # Load pathway genes
->>> pathway_genes = get_pathway_genes(n=100)
->>> 
->>> # Prepare data for modeling
->>> result = pre_model(X, y, pathway_genes=pathway_genes[0])
->>> 
->>> # Run cross-validation pipeline
->>> scores = cv_pipeline(X, y, n_iterations=10)
-"""
-
 from requests import get
 from datetime import date
 from typing import List
 from re import escape, match
 import json
 import requests
-from numpy import mean, log2, linspace, interp, std, minimum, maximum, random
+from numpy import mean, log2, random
 from typing import List
-from pandas import DataFrame, Series, concat, options, qcut, read_csv, isna, json_normalize
-import matplotlib.pyplot as plt
-from sklearn.metrics import auc
-from sklearn.metrics import RocCurveDisplay
+from pandas import DataFrame, concat, options, qcut, read_csv, isna, json_normalize
 from sklearn.model_selection import StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import cross_val_score
-from sklearn import svm
 
-def indication_pattern(indication: str = 'mpn') -> str:
-    """Select an indication regular expression pattern for a given indication.
-
-    It can be then used to filter indication specific clinical trials or approved drugs.
-
-    :param indication: indication. Choose from: ``mpn``, ``bowel``, ``breast``, ``lung``, ``melanoma`` or ``prostate``.
-
-    :return: regular expression pattern corresponding to an input indication.
+def indication_regexp(indication: str = 'mpn') -> str:
     """
+    Generate a regular expression pattern for filtering medical indications.
 
+    This function returns a regex pattern that matches various forms and abbreviations
+    of a specified medical indication. If the indication is not found in the lookup
+    table, it returns a wildcard pattern and prints a warning message.
+
+    :param indication: The medical indication to generate a regex pattern for.
+                       Must match one of the predefined indications in the lookup table.
+                       Defaults to 'mpn' (Myeloproliferative Neoplasm).
+    :type indication: str, optional
+
+    :return: A regular expression pattern string that matches the specified indication
+             and its common variations. Returns '.*' (wildcard) if indication not found.
+    :rtype: str
+
+    :raises: None - prints a warning message if indication is not recognized
+
+    **Supported Indications:**
+        - Myeloproliferative Neoplasm
+        - Breast Cancer
+        - Lung Cancer
+        - Prostate Cancer
+        - Bowel Cancer
+        - Melanoma
+        - Diabetes Mellitus Type 2
+        - Cardiovascular Disease
+
+    **Example:**
+        >>> indication_regexp('Breast Cancer')
+        '.*[Bb]reast.+[Cc]ancer.*|.*[Bb]reast.+[Cc]arcinoma.*|.*[Cc]arcinoma.+[Bb]reast.*'
+        
+        >>> indication_regexp('Unknown Condition')
+        Selected indication: Unknown Condition is not known. Proceeding with the full list of indications.
+        '.*'
+
+    .. note::
+       The default parameter value 'mpn' does not match any indication in the lookup
+       table, so it will trigger the warning message and return the wildcard pattern.
+
+    .. warning::
+       The function performs case-sensitive matching on the indication parameter
+       against the lookup table. Ensure the indication string exactly matches one
+       of the supported values.
+    """
     pattern = '.*'
 
     lookup = DataFrame({
@@ -112,40 +88,39 @@ def indication_pattern(indication: str = 'mpn') -> str:
 
     return pattern
 
-def trials(search: str = 'Myeloproliferative Neoplasm', filter_by_regexp: bool = True, fields: List[str] = ['NCTId', 'OverallStatus', 'StudyType', 'Condition', 'InterventionType', 'InterventionName', 'Phase', 'StartDate'], interventional_only: bool = True, intervention_types: List[str] = ['DRUG', 'BIOLOGICAL'], last_6_years: bool = True) -> DataFrame:
+def get_clinical_trials(search: str = 'Myeloproliferative Neoplasm', filter_by_regexp: bool = True, fields: List[str] = ['NCTId', 'OverallStatus', 'StudyType', 'Condition', 'InterventionType', 'InterventionName', 'Phase', 'StartDate'], interventional_only: bool = True, intervention_types: List[str] = ['DRUG', 'BIOLOGICAL'], last_6_years: bool = True) -> DataFrame:
     """
-    Retrieve and process clinical trials data from ClinicalTrials.gov.
-    This function searches for clinical trials based on a medical condition,
-    retrieves the data through the ClinicalTrials.gov API, and processes it
-    into a clean DataFrame format.
-    Parameters
-    ----------
-    search : str, default='Myeloproliferative Neoplasm'
-        The medical condition to search for. Spaces are replaced with '+' characters.
-    fields : List[str], default=['NCTId', 'OverallStatus', 'StudyType', 'Condition', 'InterventionType', 'InterventionName', 'Phase', 'StartDate']
-        List of fields to retrieve from the API.
-    interventional_only : bool, default=True
-        If True, only return interventional trials.
-    intervention_types : List[str], default=['DRUG', 'BIOLOGICAL']
-        Types of interventions to include.
-    indication : str, default='mpn'
-        Disease indication to filter for, used to create a regex pattern.
-    last_6_years : bool, default=True
-        If True, only include trials that started within the last 6 years.
-    Returns
-    -------
-    DataFrame
-        A pandas DataFrame containing the filtered clinical trials data with columns
-        corresponding to the requested fields. Each row represents a unique trial-intervention
-        combination after filtering.
-    Notes
-    -----
-    The function performs several data cleaning operations:
-    - Combines early phase 1 and phase 0 with phase 1
-    - Combines phase 4 and 5 with phase 3
-    - Filters trials to include only those matching the disease indication
-    - Converts start dates to years
-    - Removes duplicate entries
+    Retrieve and filter clinical trials data from ClinicalTrials.gov API.
+    This function queries the ClinicalTrials.gov API for clinical trials matching
+    the specified search criteria and applies various filters to refine the results.
+    :param search: The condition or disease to search for in clinical trials.
+        Default is 'Myeloproliferative Neoplasm'.
+    :type search: str
+    :param filter_by_regexp: Whether to filter results by disease-related indications
+        using regular expression matching. Default is True.
+    :type filter_by_regexp: bool
+    :param fields: List of field names to retrieve from the API. Default includes
+        NCTId, OverallStatus, StudyType, Condition, InterventionType,
+        InterventionName, Phase, and StartDate.
+    :type fields: List[str]
+    :param interventional_only: Whether to filter results to include only
+        interventional studies. Default is True.
+    :type interventional_only: bool
+    :param intervention_types: List of intervention types to include in results.
+        Default is ['DRUG', 'BIOLOGICAL'].
+    :type intervention_types: List[str]
+    :param last_6_years: Whether to filter results to include only trials that
+        started within the last 6 years. Default is True.
+    :type last_6_years: bool
+    :return: A DataFrame containing filtered clinical trials data with columns for
+        NCTId, OverallStatus, StudyType, InterventionType, InterventionName, Phase,
+        and StartDate. Returns None if no results are found.
+    :rtype: DataFrame or None
+    :raises: None - The function handles empty results by printing a message and
+        returning None.
+    :example:
+        >>> df = get_clinical_trials(search='Breast Cancer', last_6_years=False)
+        >>> print(df.head())
     """
     search_url = search.replace(" ", "+")
     fields = '%2C'.join(fields)
@@ -213,7 +188,7 @@ def trials(search: str = 'Myeloproliferative Neoplasm', filter_by_regexp: bool =
 
     # filter by disease related indications
     if filter_by_regexp:
-        regexp_pattern = indication_pattern(search)
+        regexp_pattern = indication_regexp(search)
         res = res[res['Condition'].str.match(regexp_pattern)]
 
     res = res.drop(['Condition'], axis=1)
@@ -233,37 +208,36 @@ def trials(search: str = 'Myeloproliferative Neoplasm', filter_by_regexp: bool =
 
 def drugbank(trials: DataFrame, date: str = '2025-03-26', pharm_action = True, approved_by = 'US') -> DataFrame:
     """
-    Match clinical trials data with DrugBank drug information and filter based on specified criteria.
+    Match clinical trials with DrugBank database entries based on intervention names.
 
-    This function takes clinical trial data and matches interventions with drugs from
-    the DrugBank database using drug synonyms. It filters the drugs based on targets,
-    synonym length, pharmacological action, specified indication, and approval status.
+    This function loads DrugBank data, filters it based on various criteria, and matches
+    clinical trial interventions with drug synonyms from the DrugBank database.
 
-    Parameters
-    ----------
-    trials : DataFrame
-        DataFrame containing clinical trial information with an 'InterventionName' column.
-    date : str, optional
-        Date when DrugBank data was obtained, default is '2025-03-26'.
-    pharm_action : bool, optional
-        If True, only includes drugs with confirmed pharmacological action, default is True. This filter makes sure that non-pharmacological targets (chemo drugs and PD1/PD1L immuno therapy drugs) are not included in the final result.
-    approved_by : str, optional
-        Approval status to filter for, one of 'US', 'Other', or 'Both', default is 'US'.
-        Determines which approval status is included in the 'Approved' column.
+    :param trials: DataFrame containing clinical trials data with an 'InterventionName' column
+    :type trials: DataFrame
+    :param date: Date string for the DrugBank data snapshot in 'YYYY-MM-DD' format, defaults to '2025-03-26'
+    :type date: str, optional
+    :param pharm_action: If True, filter results to only include drugs with pharmacological action marked as 'Yes', defaults to True
+    :type pharm_action: bool, optional
+    :param approved_by: Filter drugs by approval status. Options are 'US' (US approved only), 
+                        'Other' (approved in other countries), or 'Both' (approved in both US and other countries), 
+                        defaults to 'US'
+    :type approved_by: str, optional
+    :return: DataFrame containing matched clinical trials and DrugBank entries with the following transformations:
+             - 'Target Name' renamed to 'Target Gene'
+             - 'Approved' column added based on approval status (1 for approved, 0 otherwise)
+             - 'US Approved' and 'Other Approved' columns removed
+    :rtype: DataFrame
+    :raises: May raise exceptions related to S3 access, CSV parsing, or DataFrame operations
 
-    Returns
-    -------
-    DataFrame
-        A DataFrame containing matched clinical trial and DrugBank information with
-        the following key columns:
-        - Original clinical trial data
-        - DrugBank drug information including target genes
-        - 'Approved' column (1 for approved, 0 for not approved based on specified criteria)
+    .. note::
+       - The function filters out DrugBank entries without target information
+       - Drug synonyms are filtered to lengths between 5 and 30 characters
+       - Matching is performed using case-insensitive regex pattern matching
+       - The function reads data from an S3 bucket at 's3://alethiotx-artemis/data/drugbank/'
 
-    Notes
-    -----
-    The function performs matching by converting drug synonyms to regular expressions
-    and searching for matches in the intervention names from clinical trials.
+    .. warning::
+       This function may be computationally expensive for large datasets due to nested loop matching
     """
     # load the drugbank data
     db = read_csv('s3://alethiotx-artemis/data/drugbank/' + date + '/webdata.csv')
@@ -312,59 +286,41 @@ def drugbank(trials: DataFrame, date: str = '2025-03-26', pharm_action = True, a
 
     return res
 
-def drugscores(trials: DataFrame, include_approved: bool = True) -> DataFrame:
+def get_clinical_scores(trials: DataFrame, include_approved: bool = True) -> DataFrame:
     """
-    Compute per-target clinical development scores from a trials table.
+    Calculate clinical trial scores and statistics for target genes.
 
-    For each target gene, this function:
-    - Counts the number of unique trial-phase combinations per phase (1–3), using
-        unique rows of ['NCTId', 'Phase'] to avoid double-counting the same trial/phase.
-    - Computes a Phase Score as the sum of phase numbers across unique trial/phase
-        pairs (e.g., Phase 1 -> 1, Phase 2 -> 2, Phase 3 -> 3).
-    - Counts the number of distinct approved drugs (unique 'DrugBank ID' where
-        'Approved' == 1).
-    - Combines the above into a result indexed by target, with columns:
-        ['# Phase 1', '# Phase 2', '# Phase 3', 'Phase Score', '# Approved Drugs'].
-    - Calculates a Drug Score as:
-            Phase Score + 20 * (# Approved Drugs) if include_approved is True,
-            otherwise just Phase Score.
-    - Sorts results by Drug Score (descending).
+    This function analyzes clinical trial data to compute various metrics including
+    phase distributions, phase scores, approved drug counts, and an overall drug score
+    for each target gene.
 
-    Parameters
-    ----------
-    trials : pandas.DataFrame
-            Clinical trials data containing at least the following columns:
-            - 'Target Gene': target identifier used for grouping.
-            - 'NCTId': clinical trial identifier.
-            - 'Phase': trial phase as a string ending in the phase number (e.g., 'Phase 1').
-            - 'Approved': indicator (1/0) whether the drug is approved.
-            - 'DrugBank ID': identifier for deduplicating approved drugs per target.
-    include_approved : bool, default True
-            Whether to include the number of approved drugs in the Drug Score
-            with a weight of 20 per approved drug.
+    :param trials: DataFrame containing clinical trial data with columns including
+                   'Target Gene', 'NCTId', 'Phase', 'Approved', and 'DrugBank ID'
+    :type trials: DataFrame
+    :param include_approved: Whether to include approved drugs in the total drug score
+                            calculation. If True, approved drugs contribute 20 points
+                            each to the drug score. Defaults to True.
+    :type include_approved: bool, optional
 
-    Returns
-    -------
-    pandas.DataFrame
-            DataFrame indexed by target gene with the following columns:
-            - '# Phase 1', '# Phase 2', '# Phase 3': counts of unique trials per phase.
-            - 'Phase Score': sum of phase numbers over unique trial/phase pairs.
-            - '# Approved Drugs': count of distinct approved drugs per target.
-            - 'Drug Score': overall score used for ranking.
-            Rows are sorted by 'Drug Score' in descending order. Missing phase counts
-            are treated as zero.
+    :return: DataFrame with the following columns for each target gene:
+             - '# Phase 1': Count of Phase 1 trials
+             - '# Phase 2': Count of Phase 2 trials
+             - '# Phase 3': Count of Phase 3 trials
+             - 'Phase Score': Sum of phase numbers across all trials
+             - '# Approved Drugs': Count of unique approved drugs
+             - 'Drug Score': Total score (phase score + 20 * approved drugs if include_approved=True)
+             Results are sorted by Drug Score in descending order.
+    :rtype: DataFrame
 
-    Notes
-    -----
-    - The function prints the overall distribution of 'Phase' values to stdout.
-    - Expects 'Phase' strings to end with an integer (e.g., '...1', '...2', '...3').
+    :raises: May raise exceptions if required columns are missing from the input DataFrame
+             or if phase values cannot be converted to integers.
 
-    Raises
-    ------
-    KeyError
-            If required columns are missing.
-    ValueError
-            If 'Phase' values cannot be parsed to extract a numeric phase.
+    .. note::
+       The function prints phase value counts as a side effect during execution.
+
+    .. warning::
+       The function assumes that Phase values end with a numeric character that can
+       be extracted and converted to an integer.
     """
     # calculate number of trials in each phase
     phases = DataFrame(trials.groupby(by='Target Gene')[trials.columns].apply(lambda x: x[['NCTId', 'Phase']].drop_duplicates()['Phase'].value_counts())).unstack()
@@ -386,63 +342,6 @@ def drugscores(trials: DataFrame, include_approved: bool = True) -> DataFrame:
     res = res.sort_values(by = 'Drug Score', ascending=False)
 
     return(res)
-
-def geneshot(search, rif = 'generif'):
-    """
-    Query Ma’ayan Lab’s GeneShot API for genes associated with a search term and return a cleaned pandas DataFrame.
-
-    This function sends a POST request to https://maayanlab.cloud/geneshot/api/search with the provided term
-    and RIF source, parses the JSON response into a DataFrame, splits the API’s `gene_count` field into two
-    columns (`gene_count` and `rank`), and filters out entries whose index contains '-' or '_', retaining
-    canonical gene-like identifiers.
-
-    Parameters
-    ----------
-    search : str
-        Free-text query term (e.g., disease, phenotype, pathway) to search in GeneShot.
-    rif : str, optional
-        Reference information source used by the API to rank associations (as supported by GeneShot).
-        Defaults to 'generif'.
-
-    Returns
-    -------
-    pandas.DataFrame
-        A DataFrame indexed by gene identifier with at least:
-          - gene_count (int): number of co-mentions/hits for the gene returned by the API.
-          - rank (int): the rank assigned by the API.
-        Additional columns provided by the API are preserved.
-
-    Raises
-    ------
-    requests.exceptions.RequestException
-        If the HTTP request fails or times out.
-    json.JSONDecodeError
-        If the response body cannot be parsed as JSON.
-    KeyError
-        If the expected 'gene_count' field is missing from the API response.
-    TypeError or ValueError
-        If the structure of 'gene_count' is not the expected sequence of length 2.
-
-    Notes
-    -----
-    - Requires `requests`, `json`, and `pandas` (DataFrame).
-    - Rows with indices containing '-' or '_' are removed to reduce non-canonical identifiers.
-    - The exact schema of the API response may change; downstream code should be robust to extra columns.
-
-    Examples
-    --------
-    >>> df = geneshot("acute myeloid leukemia")
-    >>> df.loc["FLT3", ["gene_count", "rank"]]
-    """
-    GENESHOT_URL = 'https://maayanlab.cloud/geneshot/api/search'
-    payload = {"rif": rif, "term": search}
-    response = requests.post(GENESHOT_URL, json=payload)
-    data = json.loads(response.text)
-    d = DataFrame(data)
-    d['rank'] = d['gene_count'].apply(lambda x: x[1])
-    d['gene_count'] = d['gene_count'].apply(lambda x: x[0])
-    d = d[(~d.index.str.contains('-')) & (~d.index.str.contains('_'))]
-    return d
 
 def load_clinical_scores(date = '2025-11-11'):
     """
@@ -482,6 +381,90 @@ def load_clinical_scores(date = '2025-11-11'):
     cardiovascular = read_csv("s3://alethiotx-artemis/data/clinical_targets/" + date + "/cardiovascular.csv")
 
     return(breast, lung, prostate, melanoma, bowel, diabetes, cardiovascular)
+
+def get_pathway_genes(search, rif = 'generif'):
+    """
+    Query the Geneshot API to retrieve gene associations for a search term.
+
+    :param search: The search term to query for gene associations
+    :type search: str
+    :param rif: The type of reference to use for gene associations, defaults to 'generif'
+    :type rif: str, optional
+    :return: A DataFrame containing gene associations with columns for gene symbols (index),
+             gene_count (number of associations), and rank (relevance ranking)
+    :rtype: pandas.DataFrame
+
+    :raises requests.exceptions.RequestException: If the API request fails
+
+    .. note::
+       Gene symbols containing hyphens (-) or underscores (_) are filtered out from the results.
+
+    :example:
+        >>> df = get_pathway_genes('cancer')
+        >>> print(df.head())
+    """
+    GENESHOT_URL = 'https://maayanlab.cloud/geneshot/api/search'
+    payload = {"rif": rif, "term": search}
+    response = requests.post(GENESHOT_URL, json=payload)
+    data = json.loads(response.text)
+    d = DataFrame(data)
+    d['rank'] = d['gene_count'].apply(lambda x: x[1])
+    d['gene_count'] = d['gene_count'].apply(lambda x: x[0])
+    d = d[(~d.index.str.contains('-')) & (~d.index.str.contains('_'))]
+    return d
+
+def load_pathway_genes(date = '2025-11-11', n = 100):
+    """
+    Retrieve pathway genes for multiple disease types from S3 storage.
+
+    This function reads CSV files containing pathway gene data for various diseases,
+    sorts them by gene count and rank, and returns the top N pathways for each disease.
+
+    :param date: Date string in 'YYYY-MM-DD' format representing the data version,
+                 defaults to '2025-11-11'
+    :type date: str, optional
+    :param n: Number of top pathways to retrieve for each disease, defaults to 100
+    :type n: int, optional
+
+    :return: A tuple containing lists of pathway indices for each disease type in the
+             following order: (breast, lung, prostate, melanoma, bowel, diabetes,
+             cardiovascular)
+    :rtype: tuple[list, list, list, list, list, list, list]
+
+    :raises FileNotFoundError: If the specified CSV files do not exist in S3
+    :raises ValueError: If the CSV files are malformed or missing required columns
+
+    .. note::
+       The function expects CSV files to be located at
+       's3://alethiotx-artemis/data/pathway_genes/{date}/{disease}.csv'
+
+    .. note::
+       Each CSV file must contain 'gene_count' and 'rank' columns for sorting
+
+    :Example:
+
+    >>> breast, lung, prostate, melanoma, bowel, diabetes, cardio = load_pathway_genes(
+    ...     date='2025-11-11', n=50
+    ... )
+    >>> len(breast)
+    50
+    """
+    breast = read_csv('s3://alethiotx-artemis/data/pathway_genes/' + date + '/breast.csv', index_col = 0)
+    breast = breast.sort_values(['gene_count', 'rank'], ascending=False).head(n).sort_index().index.tolist()
+    lung = read_csv('s3://alethiotx-artemis/data/pathway_genes/' + date + '/lung.csv', index_col = 0)
+    lung = lung.sort_values(['gene_count', 'rank'], ascending=False).head(n).sort_index().index.tolist()
+    bowel = read_csv('s3://alethiotx-artemis/data/pathway_genes/' + date + '/bowel.csv', index_col = 0)
+    bowel = bowel.sort_values(['gene_count', 'rank'], ascending=False).head(n).sort_index().index.tolist()
+    prostate = read_csv('s3://alethiotx-artemis/data/pathway_genes/' + date + '/prostate.csv', index_col = 0)
+    prostate = prostate.sort_values(['gene_count', 'rank'], ascending=False).head(n).sort_index().index.tolist()
+    melanoma = read_csv('s3://alethiotx-artemis/data/pathway_genes/' + date + '/melanoma.csv', index_col = 0)
+    melanoma = melanoma.sort_values(['gene_count', 'rank'], ascending=False).head(n).sort_index().index.tolist()
+    diabetes = read_csv('s3://alethiotx-artemis/data/pathway_genes/' + date + '/diabetes.csv', index_col = 0)
+    diabetes = diabetes.sort_values(['gene_count', 'rank'], ascending=False).head(n).sort_index().index.tolist()
+    cardiovascular = read_csv('s3://alethiotx-artemis/data/pathway_genes/' + date + '/cardiovascular.csv', index_col = 0)
+    cardiovascular = cardiovascular.sort_values(['gene_count', 'rank'], ascending=False).head(n).sort_index().index.tolist()
+
+    return (breast, lung, prostate, melanoma, bowel, diabetes, cardiovascular)
 
 def get_all_targets(scores: list):
     """
@@ -541,59 +524,6 @@ def cut_clinical_scores(scores: list, lowest_score = 0):
         res[n] = d[d['Drug Score'] > lowest_score]
 
     return(res)
-
-def get_pathway_genes(date = '2025-11-11', n = 100):
-    """
-    Retrieve pathway genes for multiple disease types from S3 storage.
-
-    This function reads CSV files containing pathway gene data for various diseases,
-    sorts them by gene count and rank, and returns the top N pathways for each disease.
-
-    :param date: Date string in 'YYYY-MM-DD' format representing the data version,
-                 defaults to '2025-11-11'
-    :type date: str, optional
-    :param n: Number of top pathways to retrieve for each disease, defaults to 100
-    :type n: int, optional
-
-    :return: A tuple containing lists of pathway indices for each disease type in the
-             following order: (breast, lung, prostate, melanoma, bowel, diabetes,
-             cardiovascular)
-    :rtype: tuple[list, list, list, list, list, list, list]
-
-    :raises FileNotFoundError: If the specified CSV files do not exist in S3
-    :raises ValueError: If the CSV files are malformed or missing required columns
-
-    .. note::
-       The function expects CSV files to be located at
-       's3://alethiotx-artemis/data/pathway_genes/{date}/{disease}.csv'
-
-    .. note::
-       Each CSV file must contain 'gene_count' and 'rank' columns for sorting
-
-    :Example:
-
-    >>> breast, lung, prostate, melanoma, bowel, diabetes, cardio = get_pathway_genes(
-    ...     date='2025-11-11', n=50
-    ... )
-    >>> len(breast)
-    50
-    """
-    breast = read_csv('s3://alethiotx-artemis/data/pathway_genes/' + date + '/breast.csv', index_col = 0)
-    breast = breast.sort_values(['gene_count', 'rank'], ascending=False).head(n).sort_index().index.tolist()
-    lung = read_csv('s3://alethiotx-artemis/data/pathway_genes/' + date + '/lung.csv', index_col = 0)
-    lung = lung.sort_values(['gene_count', 'rank'], ascending=False).head(n).sort_index().index.tolist()
-    bowel = read_csv('s3://alethiotx-artemis/data/pathway_genes/' + date + '/bowel.csv', index_col = 0)
-    bowel = bowel.sort_values(['gene_count', 'rank'], ascending=False).head(n).sort_index().index.tolist()
-    prostate = read_csv('s3://alethiotx-artemis/data/pathway_genes/' + date + '/prostate.csv', index_col = 0)
-    prostate = prostate.sort_values(['gene_count', 'rank'], ascending=False).head(n).sort_index().index.tolist()
-    melanoma = read_csv('s3://alethiotx-artemis/data/pathway_genes/' + date + '/melanoma.csv', index_col = 0)
-    melanoma = melanoma.sort_values(['gene_count', 'rank'], ascending=False).head(n).sort_index().index.tolist()
-    diabetes = read_csv('s3://alethiotx-artemis/data/pathway_genes/' + date + '/diabetes.csv', index_col = 0)
-    diabetes = diabetes.sort_values(['gene_count', 'rank'], ascending=False).head(n).sort_index().index.tolist()
-    cardiovascular = read_csv('s3://alethiotx-artemis/data/pathway_genes/' + date + '/cardiovascular.csv', index_col = 0)
-    cardiovascular = cardiovascular.sort_values(['gene_count', 'rank'], ascending=False).head(n).sort_index().index.tolist()
-
-    return (breast, lung, prostate, melanoma, bowel, diabetes, cardiovascular)
 
 def find_overlapping_genes(genes: list, overlap = 1, common_genes = []):
     """
@@ -832,109 +762,6 @@ def cv_pipeline(X: DataFrame, y: DataFrame, y_slot = 'y_binary', bins: int = 3, 
 
     return(score)
 
-def roc_curve(X: DataFrame, y: Series, n_splits = 5, classifier: str = 'rf', random_state: int = 1234) -> float:
-    """
-    Generate and plot ROC curves using k-fold cross-validation.
-
-    This function performs stratified k-fold cross-validation to generate ROC curves
-    for a given classifier and dataset. It plots individual fold ROC curves along with
-    the mean ROC curve and standard deviation bands.
-
-    :param X: Feature matrix containing the independent variables
-    :type X: DataFrame
-    :param y: Target vector containing the dependent variable (binary classification)
-    :type y: Series
-    :param n_splits: Number of folds for cross-validation, defaults to 5
-    :type n_splits: int, optional
-    :param classifier: Type of classifier to use. Options: 'rf' (Random Forest) or 'svm' (Support Vector Machine), defaults to 'rf'
-    :type classifier: str, optional
-    :param random_state: Random seed for reproducibility, defaults to 1234
-    :type random_state: int, optional
-    :return: Mean area under the ROC curve (AUC) across all folds
-    :rtype: float
-    :raises ValueError: If classifier parameter is not 'rf' or 'svm'
-
-    .. note::
-        The function displays a matplotlib plot showing individual fold ROC curves,
-        mean ROC curve, and ±1 standard deviation bands.
-
-    .. seealso::
-        :class:`sklearn.ensemble.RandomForestClassifier`
-        :class:`sklearn.svm.SVC`
-        :class:`sklearn.model_selection.StratifiedKFold`
-
-    :Example:
-
-    >>> mean_auc = roc_curve(X_train, y_train, n_splits=10, classifier='rf')
-    >>> print(f"Mean AUC: {mean_auc:.3f}")
-    """
-    # define k-fold
-    cv = StratifiedKFold(n_splits = n_splits)
-    # define classifier
-    if classifier == 'rf':
-        classifier = RandomForestClassifier()
-    elif classifier == 'svm':
-        classifier = svm.SVC(kernel="linear", probability=True, random_state=random_state)
-    else:
-        raise ValueError('Wrong classifier parameter! Only `rf` or `svm` can be accepted.')
-    # prepare for fold iterations
-    tprs = []
-    aucs = []
-    mean_fpr = linspace(0, 1, 100)
-    fig, ax = plt.subplots(figsize=(6, 6))
-    # iterate through the folds
-    for fold, (train, test) in enumerate(cv.split(X, y)):
-        classifier.fit(X.iloc[train,:], y.iloc[train])
-        viz = RocCurveDisplay.from_estimator(
-            classifier,
-            X.iloc[test,:],
-            y.iloc[test],
-            name=f"ROC fold {fold}",
-            alpha=0.3,
-            lw=1,
-            ax=ax,
-        )
-        interp_tpr = interp(mean_fpr, viz.fpr, viz.tpr)
-        interp_tpr[0] = 0.0
-        tprs.append(interp_tpr)
-        aucs.append(viz.roc_auc)
-    mean_tpr = mean(tprs, axis=0)
-    mean_tpr[-1] = 1.0
-    mean_auc = auc(mean_fpr, mean_tpr)
-    std_auc = std(aucs)
-    # plot the results
-    ax.plot([0, 1], [0, 1], "k--", label="chance level (AUC = 0.5)")
-    ax.plot(
-        mean_fpr,
-        mean_tpr,
-        color="b",
-        label=r"Mean ROC (AUC = %0.2f $\pm$ %0.2f)" % (mean_auc, std_auc),
-        lw=2,
-        alpha=0.8,
-    )
-    std_tpr = std(tprs, axis=0)
-    tprs_upper = minimum(mean_tpr + std_tpr, 1)
-    tprs_lower = maximum(mean_tpr - std_tpr, 0)
-    ax.fill_between(
-        mean_fpr,
-        tprs_lower,
-        tprs_upper,
-        color="grey",
-        alpha=0.2,
-        label=r"$\pm$ 1 std. dev.",
-    )
-    ax.set(
-        xlim=[-0.05, 1.05],
-        ylim=[-0.05, 1.05],
-        xlabel="False Positive Rate",
-        ylabel="True Positive Rate",
-        title=f"Mean ROC curve with variability\n(Positive label)",
-    )
-    ax.axis("square")
-    ax.legend(loc="lower right")
-    plt.show()
-    return(mean_auc)
-
 # run when file is directly executed
 if __name__ == '__main__':
     # 'Myeloproliferative Neoplasm',  
@@ -945,15 +772,15 @@ if __name__ == '__main__':
     # 'Melanoma',
     # 'Diabetes Mellitus Type 2',
     # 'Cardiovascular Disease',
-    trs = trials(search="Breast Cancer")
+    trs = get_clinical_trials(search="Breast Cancer")
     print(trs)
     db = drugbank(trs)
     print(db)
-    scores = drugscores(db)
+    scores = get_clinical_scores(db)
     print(scores)
-    # df = geneshot("acute myeloid leukemia")
-    # print(df.loc["FLT3", ["gene_count", "rank"]])
-    breast, lung, prostate, melanoma, bowel, diabetes, cardiovascular = load_clinical_scores(date="2025-09-15")
+    df = get_pathway_genes("acute myeloid leukemia")
+    print(df.loc["FLT3", ["gene_count", "rank"]])
+    breast, lung, prostate, melanoma, bowel, diabetes, cardiovascular = load_clinical_scores(date="2025-11-11")
     print('Clinical scores:\n\n')
     print([breast, lung, prostate, melanoma, bowel, diabetes, cardiovascular])
     print('All target genes:\n\n')
@@ -961,7 +788,7 @@ if __name__ == '__main__':
     print(known_targets)
     print('Cut clinical scores:\n\n')
     print(cut_clinical_scores([breast, lung, prostate, melanoma, bowel, diabetes, cardiovascular], lowest_score = 10))
-    breast_pg, lung_pg, prostate_pg, melanoma_pg, bowel_pg, diabetes_pg, cardiovascular_pg = get_pathway_genes(date='2025-09-15', n=50)
+    breast_pg, lung_pg, prostate_pg, melanoma_pg, bowel_pg, diabetes_pg, cardiovascular_pg = load_pathway_genes(date='2025-09-15', n=50)
     print('Uniquified clinical scores:\n\n')
     print(uniquify_clinical_scores([breast, lung, prostate, melanoma, bowel, diabetes, cardiovascular]))
     print('Uniquified pathway genes:\n\n')
@@ -994,8 +821,6 @@ if __name__ == '__main__':
     res = pre_model(X, y, known_targets = known_targets, bins = 5)
     print(res['y_encoded'])
 
-    # print('\nResults of cross validation pipeline:')
-    # print(cv_pipeline(X, y, n_iterations = 3))
-    # print(cv_pipeline(X, y, y_slot = 'y_encoded', scoring = 'accuracy', n_iterations = 3))
-
-    # roc_curve(res['X'], res['y_binary'], n_splits=5)
+    print('\nResults of cross validation pipeline:')
+    print(cv_pipeline(X, y, n_iterations = 3))
+    print(cv_pipeline(X, y, y_slot = 'y_encoded', scoring = 'accuracy', n_iterations = 3))
