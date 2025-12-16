@@ -1,0 +1,56 @@
+name: Build and publish Alethio Therapeutics documentation
+
+on:
+  push:
+    branches: [ '**' ]  # This will match all branches
+    tags:
+      - 'v*'
+    # You can specify paths if you only want to trigger on certain file changes
+    paths:
+      - 'src/**'
+      - 'pyproject.toml'
+      - 'README.md'
+  workflow_dispatch:  # This enables manual triggering
+    inputs:
+      version:
+        description: 'Override version tag (optional)'
+        required: false
+        default: ''
+
+# security: restrict permissions for CI jobs.
+permissions:
+  contents: read
+
+jobs:
+  # Build the documentation and upload the static HTML files as an artifact.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+      - run: pip install -e .
+      - run: pip install pdoc
+      - run: pdoc -o docs alethiotx --docformat restructuredtext
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs/
+
+  # Deploy the artifact to GitHub pages.
+  # This is a separate job so that only actions/deploy-pages has the necessary permissions.
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
