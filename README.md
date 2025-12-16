@@ -13,15 +13,17 @@
 
 #### Artemis Module (`alethiotx.artemis`)
 
-The Artemis module enables accessible and scalable drug prioritization by integrating clinical trial data, drug databases (TTD), pathway information, and machine learning models. It leverages public knowledge graphs to prioritize therapeutic targets across multiple disease areas.
+The Artemis module enables accessible and scalable drug target prioritization by integrating drug molecule and target data from ChEMBL (including clinical trial phases and approvals), MeSH disease hierarchies, HGNC gene families, pathway information from GeneShot, and machine learning pipelines. It leverages public knowledge graphs to prioritize therapeutic targets across multiple disease areas.
 
 ### Artemis Module Features
 
-- **Clinical Trials**: Query and analyze clinical trials data from ClinicalTrials.gov
-- **TTD**: Match clinical interventions with TTD drug information and targets
-- **Pathway Genes**: Retrieve and analyze pathway genes using GeneShot API
-- **Target Scoring**: Calculate clinical target scores for drug targets based on trial phases and approvals
-- **Machine Learning Pipeline**: Built-in cross-validation and for target prediction
+- **ChEMBL Integration**: Query and process ChEMBL bioactive molecule database with clinical trial information and automatic parent molecule normalization
+- **MeSH Hierarchy**: Retrieve MeSH disease trees and descendants for comprehensive disease coverage
+- **HGNC Gene Families**: Download and analyze gene family data to identify and filter over-represented families
+- **Clinical Scoring**: Calculate clinical validation scores for drug targets based on trial phases, approvals, and family representation
+- **Pathway Genes**: Retrieve and analyze disease-associated genes using Ma'ayan Lab's GeneShot API
+- **Machine Learning Pipeline**: Built-in cross-validation with configurable classifiers for target prediction
+- **UpSet Plots**: Visualize gene set intersections across multiple diseases
 - **Multi-Disease Support**: Pre-configured for breast, lung, prostate, melanoma, bowel cancer, diabetes, and cardiovascular disease
 
 ### Future Modules
@@ -38,124 +40,162 @@ pip install alethiotx
 
 > **Note:** The examples below demonstrate the **Artemis** module functionality. As new modules are added to the package, they will have their own usage examples.
 
-### 1. Retrieve Clinical Trials Data
+### 1. Query ChEMBL and Compute Clinical Scores
 
 ```python
-from alethiotx.artemis import trials, ttd, drugscores
+from alethiotx.artemis.chembl import molecules
+from alethiotx.artemis.clinical import compute
 
-# Query clinical trials for a specific indication
-breast_trials = get_clinical_trials(search='Breast Cancer', last_6_years=True)
+# Query ChEMBL for parent molecules with clinical trial data
+chembl_data = molecules(version='36', top_n_activities=1)
 
-# Match trials with TTD to get target information
-ttd_data = ttd(breast_trials)
+# Compute clinical validation scores for specific diseases
+results = compute(
+    mesh_headings=['Breast Neoplasms', 'Lung Neoplasms'],
+    chembl_version='36',
+    trials_only_last_n_years=6,
+    filter_families=True
+)
 
-# Calculate clinical development scores
-scores = get_clinical_scores(ttd_data, include_approved=True)
-print(scores.head())
+# Access results for each disease
+breast_targets = results['Breast Neoplasms']
+print(breast_targets.head())
 ```
 
 ### 2. Load Pre-computed Clinical Scores
 
 ```python
-from alethiotx.artemis import load_clinical_scores
+from alethiotx.artemis.clinical import load
 
-# Load clinical scores for multiple diseases
-breast, lung, prostate, melanoma, bowel, diabetes, cardio = load_clinical_scores(date='2025-11-11')
+# Load pre-computed clinical scores for multiple diseases from S3
+breast, lung, prostate, melanoma, bowel, diabetes, cardio = load(date='2025-12-08')
 ```
 
 ### 3. Pathway Gene Analysis
 
 ```python
-from alethiotx.artemis import get_pathway_genes load_pathway_genes
+from alethiotx.artemis.pathway import get, load
 
-# Query GeneShot for disease-associated genes
-aml_genes = get_pathway_genes("acute myeloid leukemia")
+# Query GeneShot API for disease-associated genes
+aml_genes = get("acute myeloid leukemia", rif='generif')
 print(aml_genes.loc["FLT3", ["gene_count", "rank"]])
 
-# Get top pathway genes for diseases
-breast_pg, lung_pg, prostate_pg, melanoma_pg, bowel_pg, diabetes_pg, cardio_pg = load_pathway_genes(n=100)
+# Load pre-computed pathway genes for multiple diseases
+breast_pg, lung_pg, prostate_pg, melanoma_pg, bowel_pg, diabetes_pg, cardio_pg = load(date='2025-11-11', n=100)
 ```
 
 ### 4. Machine Learning Pipeline
 
 ```python
-from alethiotx.artemis import pre_model, cv_pipeline, roc_curve
+from alethiotx.artemis.cv import prepare, run
 import pandas as pd
 
 # Prepare your knowledge graph features (X) and clinical scores (y)
-result = pre_model(X, y, pathway_genes=pathway_genes, bins=3)
+result = prepare(
+    X, 
+    y, 
+    pathway_genes=pathway_genes, 
+    known_targets=known_targets,
+    bins=3,
+    rand_seed=12345
+)
 
 # Run cross-validation pipeline
-scores = cv_pipeline(X, y, n_iterations=10, scoring='roc_auc')
+scores = run(
+    result['X'], 
+    result['y_binary'], 
+    n_splits=5, 
+    n_iterations=10, 
+    classifier='rf',
+    scoring='roc_auc'
+)
 print(f"Mean AUC: {sum(scores)/len(scores):.3f}")
-
-# Generate ROC curves
-mean_auc = roc_curve(result['X'], result['y_binary'], n_splits=5, classifier='rf')
 ```
 
 ### 5. Visualize Gene Overlaps with UpSet Plots
 
 ```python
-from alethiotx.artemis import prepare_upset, create_upset_plot
+from alethiotx.artemis.upset import prepare, create
+from alethiotx.artemis.clinical import load
+from alethiotx.artemis.pathway import load as load_pathway
 
-# Load clinical scores or pathway genes for multiple diseases
-breast, lung, prostate, melanoma, bowel, diabetes, cardio = load_clinical_scores()
+# Load clinical scores for multiple diseases
+breast, lung, prostate, melanoma, bowel, diabetes, cardio = load(date='2025-12-08')
 
 # Prepare data for UpSet plot (mode='ct' for clinical targets)
-upset_data = prepare_upset(breast, lung, prostate, melanoma, bowel, diabetes, cardio, mode='ct')
+upset_data = prepare(breast, lung, prostate, melanoma, bowel, diabetes, cardio, mode='ct')
 
 # Create and display the UpSet plot
-plot = create_upset_plot(upset_data, min_subset_size=5)
+plot = create(upset_data, min_subset_size=5)
 plot.plot()
 
 # For pathway genes, use mode='pg'
-breast_pg, lung_pg, prostate_pg, melanoma_pg, bowel_pg, diabetes_pg, cardio_pg = load_pathway_genes(n=100)
-upset_data_pg = prepare_upset(breast_pg, lung_pg, prostate_pg, melanoma_pg, bowel_pg, diabetes_pg, cardio_pg, mode='pg')
-plot_pg = create_upset_plot(upset_data_pg, min_subset_size=10)
+breast_pg, lung_pg, prostate_pg, melanoma_pg, bowel_pg, diabetes_pg, cardio_pg = load_pathway(date='2025-11-11', n=100)
+upset_data_pg = prepare(breast_pg, lung_pg, prostate_pg, melanoma_pg, bowel_pg, diabetes_pg, cardio_pg, mode='pg')
+plot_pg = create(upset_data_pg, min_subset_size=10)
 plot_pg.plot()
 ```
 
 ## Supported Disease Indications (Artemis Module)
 
-The Artemis module includes built-in support for:
+The Artemis module includes built-in pre-computed data for:
 
-- **Myeloproliferative Neoplasm (MPN)**
-- **Breast Cancer**
-- **Lung Cancer**
-- **Prostate Cancer**
-- **Bowel Cancer (Colorectal)**
-- **Melanoma**
+- **Breast Cancer** (Breast Neoplasms)
+- **Lung Cancer** (Lung Neoplasms)
+- **Prostate Cancer** (Prostatic Neoplasms)
+- **Melanoma** (Skin Neoplasms)
+- **Bowel Cancer** (Intestinal Neoplasms)
 - **Diabetes Mellitus Type 2**
 - **Cardiovascular Disease**
 
+The module supports querying any disease with MeSH headings via the `compute()` function.
+
 ## Artemis Module API Reference
 
-### Data Loading & Processing
+### ChEMBL Module (`alethiotx.artemis.chembl`)
 
-- `get_clinical_trials()` - Retrieve clinical trials from ClinicalTrials.gov
-- `ttd()` - Match trials with TTD drug/target data
-- `get_clinical_scores()` - Calculate per-target clinical development scores
-- `load_clinical_scores()` - Load pre-computed clinical scores from S3
-- `get_pathway_genes()` - Query Ma'ayan Lab's GeneShot API for gene associations
-- `load_pathway_genes()` - Retrieve pathway gene data
+- `molecules(version, top_n_activities)` - Query ChEMBL for parent molecules with clinical trial data
+- `infer_nct_year(nct_id)` - Infer registration year from ClinicalTrials.gov NCT identifier
 
-### Data Preparation
+### Clinical Scores Module (`alethiotx.artemis.clinical`)
 
-- `get_all_targets()` - Extract unique target genes from score lists
-- `cut_clinical_scores()` - Filter scores by threshold
-- `find_overlapping_genes()` - Identify genes present in multiple datasets
-- `uniquify_clinical_scores()` - Remove overlapping genes from clinical scores
-- `uniquify_pathway_genes()` - Remove overlapping genes from pathway lists
+- `compute(mesh_headings, chembl_version, trials_only_last_n_years, filter_families)` - Compute clinical validation scores for drug targets
+- `load(date)` - Load pre-computed clinical scores from S3
+- `lookup_drug_family_representation(chembl)` - Create drug-disease-family representation lookup table
+- `filter_overrepresented_families(targets_df, drug_chembl_id, mesh_heading, lookup_table)` - Filter over-represented gene families
+- `unique(scores, overlap, common_genes)` - Remove overlapping genes from clinical scores
+- `approved(scores)` - Filter to include only approved targets
+- `all_targets(scores)` - Extract all unique target genes from score lists
 
-### Machine Learning
+### Pathway Genes Module (`alethiotx.artemis.pathway`)
 
-- `pre_model()` - Prepare datasets for ML model training
-- `cv_pipeline()` - Cross-validation pipeline with customizable classifiers
+- `get(search, rif)` - Query Ma'ayan Lab's GeneShot API for disease-associated genes
+- `load(date, n)` - Load pre-computed pathway genes from S3
+- `unique(genes, overlap, common_genes)` - Remove overlapping genes from pathway lists
 
-### Visualization
+### MeSH Module (`alethiotx.artemis.mesh`)
 
-- `prepare_upset()` - Prepare disease-related data for UpSet plot visualization
-- `create_upset_plot()` - Create UpSet plots for visualizing gene set intersections across diseases
+- `tree(s3_base, url_base, file_base)` - Retrieve MeSH tree structure
+- `descendants(heading, s3_base, file_base, url_base)` - Get all descendant MeSH headings
+
+### HGNC Module (`alethiotx.artemis.hgnc`)
+
+- `download(gene_has_family_url, family_url, hgnc_complete_url)` - Download HGNC gene family data
+- `process(gene_has_family, family, hgnc_data)` - Process HGNC data and create gene-family mappings
+
+### Machine Learning Module (`alethiotx.artemis.cv`)
+
+- `prepare(X, y, pathway_genes, known_targets, term_num, bins, rand_seed)` - Prepare datasets for ML model training
+- `run(X, y, n_splits, n_iterations, classifier, scoring)` - Cross-validation pipeline with configurable classifiers
+
+### Visualization Module (`alethiotx.artemis.upset`)
+
+- `prepare(breast, lung, prostate, melanoma, bowel, diabetes, cardiovascular, mode)` - Prepare data for UpSet plot
+- `create(indications, min_subset_size)` - Create UpSet plots for visualizing gene set intersections
+
+### Utilities (`alethiotx.artemis.utils`)
+
+- `find_overlapping_genes(genes, overlap, common_genes)` - Find genes that overlap across multiple gene lists
 
 ## Data Storage (Artemis Module)
 
@@ -163,9 +203,10 @@ The Artemis module uses AWS S3 for storing pre-computed data:
 
 ```
 s3://alethiotx-artemis/data/
-├── clinical_targets/{date}/{disease}.csv
+├── clinical_scores/{date}/{disease}.csv
 ├── pathway_genes/{date}/{disease}.csv
-└── ttd/{date}
+├── chembl/{version}/molecules.csv
+└── mesh/d{year}.pkl
 ```
 
 ## Requirements
@@ -175,11 +216,11 @@ s3://alethiotx-artemis/data/
 - scikit-learn
 - pandas
 - numpy
-- matplotlib
 - setuptools
 - fsspec
 - s3fs
 - upsetplot
+- chembl-downloader
 
 ## Citation
 
