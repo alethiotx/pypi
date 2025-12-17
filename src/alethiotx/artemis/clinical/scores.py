@@ -445,7 +445,7 @@ def compute(mesh_headings: list, chembl_version: str = '36', trials_only_last_n_
       - Phase 4: Approved drugs (post-marketing surveillance)
    
    - **Score Aggregation**: For each target gene:
-   
+
       - Sum all trial phases (0-3) across all drugs → phase_scores
       - Check if any drug is approved (phase 4) → approved (boolean)
       - Calculate final score: clinical_scores = phase_scores + (20 if approved else 0)
@@ -483,7 +483,7 @@ def compute(mesh_headings: list, chembl_version: str = '36', trials_only_last_n_
    biasing results toward that family. With filtering (default), only 1 RTK representative is kept,
    producing unbiased scores that better reflect biological diversity.
    
-   :param mesh_headings: List of MeSH disease headings to analyze. Standard MeSH terms like:
+   :param mesh_headings: List of MeSH disease headings to analyze. Standard MeSH terms like::
                          - 'Breast Neoplasms' (breast cancer)
                          - 'Lung Neoplasms' (lung cancer)
                          - 'Diabetes Mellitus, Type 2' (type 2 diabetes)
@@ -492,13 +492,13 @@ def compute(mesh_headings: list, chembl_version: str = '36', trials_only_last_n_
                          Each heading is automatically expanded to include all MeSH descendant terms.
                          Use exact MeSH terminology for best results.
    :type mesh_headings: list[str]
-   :param chembl_version: ChEMBL database version to use. Versions correspond to data release dates:
+   :param chembl_version: ChEMBL database version to use. Versions correspond to data release dates::
                           - '36' (default): Data through 2024
                           - '35': Data through 2023
                           
                           See https://www.ebi.ac.uk/chembl/ for version details.
    :type chembl_version: str, optional
-   :param trials_only_last_n_years: Temporal filter for recent trials only. If provided:
+   :param trials_only_last_n_years: Temporal filter for recent trials only. If provided::
                                     - Filters to trials registered in last N years
                                     - Year inferred from ClinicalTrials.gov NCT IDs
                                     - Useful for identifying emerging targets
@@ -508,7 +508,7 @@ def compute(mesh_headings: list, chembl_version: str = '36', trials_only_last_n_
                                     - ``10``: Last decade
                                     - ``None`` (default): All historical trials
    :type trials_only_last_n_years: int or None, optional
-   :param filter_families: Whether to apply gene family filtering to reduce bias:
+   :param filter_families: Whether to apply gene family filtering to reduce bias::
                            
                            - ``True`` (default): Filter over-represented families
                              (recommended for unbiased target prioritization)
