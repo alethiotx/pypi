@@ -5,37 +5,55 @@ import re
 def infer_nct_year(nct_id):
     """
     Infer the approximate registration year from a ClinicalTrials.gov NCT identifier.
-    NCT IDs follow the format ``NCT########``, where the numeric portion generally increases
-    over time. This function uses approximate year ranges based on observed NCT ID
-    allocation patterns to estimate when a trial was registered.
+    
+    NCT IDs follow the format ``NCT########``, where the 8-digit numeric portion is assigned
+    sequentially and increases over time. This function uses empirically-observed NCT ID
+    allocation patterns to estimate when a trial was registered, which is useful for temporal
+    filtering and analysis when exact registration dates are not available.
 
-    NCT IDs are sequential and follow approximate ranges:
-    - ``NCT00000000``-``NCT00999999``: ~1999-2004
-    - ``NCT01000000``-``NCT01999999``: ~2005-2011
-    - ``NCT02000000``-``NCT02999999``: ~2012-2015
-    - ``NCT03000000``-``NCT03999999``: ~2016-2018
-    - ``NCT04000000``-``NCT04999999``: ~2019-2021
-    - ``NCT05000000``-``NCT05999999``: ~2022-2023
+    **NCT ID Allocation Ranges:**
+    
+    - ``NCT00000000`` - ``NCT00999999``: ~1999-2004
+    - ``NCT01000000`` - ``NCT01999999``: ~2005-2011
+    - ``NCT02000000`` - ``NCT02999999``: ~2012-2015
+    - ``NCT03000000`` - ``NCT03999999``: ~2016-2018
+    - ``NCT04000000`` - ``NCT04999999``: ~2019-2021
+    - ``NCT05000000`` - ``NCT05999999``: ~2022-2023
     - ``NCT06000000``+: ~2024+
 
-    :param nct_id: A ClinicalTrials.gov identifier (e.g., ``NCT00000001``)
+    :param nct_id: A ClinicalTrials.gov identifier (e.g., ``NCT00500000``)
     :type nct_id: str
-    :return: Estimated year of trial registration, or None if the NCT ID is invalid
+    :return: Estimated year of trial registration as an integer, or ``None`` if the NCT ID is invalid/malformed
     :rtype: int or None
 
-    **Example**
-
+    **Examples**
+    
     >>> infer_nct_year("NCT00500000")
     2002
     >>> infer_nct_year("NCT03000000")
     2016
+    >>> infer_nct_year("NCT06123456")
+    2024
     >>> infer_nct_year("invalid")
     None
+    >>> infer_nct_year("NCT123")  # Too short
+    None
+    
+    **Use Cases:**
+    
+    - Filtering clinical trials data by approximate time period
+    - Temporal analysis of drug development trends
+    - Quick year estimation when full trial metadata is unavailable
+    
     .. note::
-        This function provides an approximation based on historical NCT ID allocation
-        patterns and may not be accurate for all trials. The actual registration date
-        should be obtained from the official ClinicalTrials.gov database when precision
-        is required.
+        This function provides an **approximation** based on historical NCT ID allocation
+        patterns. Individual trials may vary by ±1-2 years from the estimated value.
+        For precise temporal analysis, obtain the actual registration date from the
+        ClinicalTrials.gov API or database.
+    
+    .. warning::
+        Returns ``None`` for invalid inputs including non-string types, IDs without the
+        "NCT" prefix, or IDs that don't contain exactly 8 digits after "NCT".
     """
     if not isinstance(nct_id, str) or not nct_id.startswith('NCT'):
         return None
@@ -65,51 +83,143 @@ def infer_nct_year(nct_id):
 
 def molecules(version: str = '36', top_n_activities: int = 1):
     """
-    Query ChEMBL database for parent molecules with clinical trial data and drug indications.
+    Query ChEMBL database for bioactive drug molecules with clinical trial data and therapeutic indications.
     
-    This function normalizes all molecules to their parent forms and aggregates indications from
-    both parent and child molecules (e.g., salt forms). Mechanism assignment follows this hierarchy:
-    1. Use parent's ``DRUG_MECHANISM`` if available
-    2. Inherit from any child's ``DRUG_MECHANISM`` if parent lacks mechanisms
-    3. Use top N activities from ``ACTIVITIES`` table if no mechanisms exist
+    This function retrieves comprehensive drug-target-indication relationships from ChEMBL, automatically
+    normalizing all molecular forms (salts, formulations, etc.) to their parent compounds. It integrates
+    clinical trial phases, MeSH disease classifications, drug mechanisms, and target information to create
+    a unified dataset for drug target prioritization and discovery.
     
-    All mechanisms are independent of indication - a molecule has one set of targets that apply
-    to all its indications.
+    **Data Processing Workflow:**
     
-    :param version: ChEMBL database version to query, defaults to ``36``
+    1. **Parent Normalization**: All child molecules (salts, prodrugs, formulations) are mapped to their
+       parent compound using ChEMBL's molecule hierarchy
+    2. **Indication Aggregation**: Drug indications from both parent and all child molecules are combined
+    3. **Target Assignment**: Molecular targets are identified using a three-tier hierarchy:
+       
+    - Primary: Parent molecule's ``DRUG_MECHANISM`` table entries (known mechanisms)
+    - Secondary: Child molecule mechanisms (inherited when parent lacks mechanisms)
+    - Tertiary: Top N most-studied targets from ``ACTIVITIES`` table (bioassay data)
+    
+    4. **Clinical Trial Mapping**: Links molecules to ClinicalTrials.gov identifiers with phase information
+    5. **Year Inference**: Estimates trial registration year from NCT identifiers
+    
+    **Key Features:**
+    
+    - Only includes molecules with clinical trial references (ClinicalTrials.gov)
+    - Filters to human targets only (``Homo sapiens``)
+    - One molecule-indication-target per row (exploded format for multi-trial drugs)
+    - Mechanisms apply to all indications of a molecule (not indication-specific)
+    
+    :param version: ChEMBL database version to query. Version 36 covers data through 2024.
+                    See https://www.ebi.ac.uk/chembl/ for available versions.
     :type version: str, optional
-    :param top_n_activities: For molecules without ``DRUG_MECHANISM``, use top N targets from ``ACTIVITIES`` table, defaults to 1
+    :param top_n_activities: For molecules without documented mechanisms (no ``DRUG_MECHANISM`` entries),
+                             include the top N most-studied targets from bioassay data. Set to 0 to
+                             exclude activity-based targets entirely. Defaults to 1 (most-studied target only).
     :type top_n_activities: int, optional
-    :return: DataFrame containing parent molecule information with the following key columns:
-    - ``chembl_id``: ChEMBL identifier for the parent molecule
-    - ``pref_name``: Preferred name of the parent molecule
-    - ``mesh_heading``: MeSH term for the indication (aggregated from parent and children)
-    - ``mesh_id``: MeSH identifier
-    - ``phase``: Clinical trial phase for this indication
-    - ``reference_type``: Type of reference (filtered to 'ClinicalTrials')
-    - ``clinical_trial_id``: ClinicalTrials.gov identifier(s), exploded if multiple
-    - ``target_chembl_id``: ChEMBL identifier for the target
-    - ``target_organism``: Target organism (filtered to 'Homo sapiens')
-    - ``target_type``: Type of target
-    - ``target_uniprot_id``: UniProt accession for the target
-    - ``target_gene_name``: Gene symbol for the target
-    - ``mechanism_of_action``: Description of the mechanism of action (NULL for activity-derived targets)
-    - ``action_type``: Type of action on the target (NULL for activity-derived targets)
-    - ``parent_molregno``: Internal molecule registry number of parent
-    - ``trial_year``: Inferred year from clinical trial ID (nullable integer)
-    - ``target_source``: ``DRUG_MECHANISM``, ``DRUG_MECHANISM_CHILD``, or ``ACTIVITIES``
+    
+    :return: DataFrame with one row per parent-molecule-indication-target combination. 
+    
+    **Columns:**
+    
+    **Molecule Information:**
+    
+    - ``chembl_id`` (str): ChEMBL identifier for the parent molecule (e.g., 'CHEMBL25')
+    - ``pref_name`` (str): Preferred drug name (e.g., 'ASPIRIN')
+    - ``parent_molregno`` (int): Internal ChEMBL registry number for parent molecule
+    
+    **Indication Information:**
+    
+    - ``mesh_heading`` (str): MeSH disease term (e.g., 'Lung Neoplasms')
+    - ``mesh_id`` (str): MeSH unique identifier (e.g., 'D008175')
+    - ``phase`` (int): Maximum clinical trial phase for this indication (0-4, where 4=approved)
+    - ``reference_type`` (str): Always 'ClinicalTrials' (pre-filtered)
+    - ``clinical_trial_id`` (str): ClinicalTrials.gov NCT identifier (e.g., 'NCT00123456')
+    - ``trial_year`` (int, nullable): Inferred trial registration year via :func:`infer_nct_year`
+    
+    **Target Information:**
+    
+    - ``target_chembl_id`` (str): ChEMBL target identifier (e.g., 'CHEMBL240')
+    - ``target_organism`` (str): Always 'Homo sapiens' (pre-filtered)
+    - ``target_type`` (str): Target classification (e.g., 'SINGLE PROTEIN', 'PROTEIN COMPLEX')
+    - ``target_uniprot_id`` (str, nullable): UniProt accession (e.g., 'P35354')
+    - ``target_gene_name`` (str, nullable): HGNC gene symbol (e.g., 'EGFR')
+    - ``mechanism_of_action`` (str, nullable): Mechanism description (NULL for activity-derived targets)
+    - ``action_type`` (str, nullable): Drug action type (e.g., 'INHIBITOR', 'AGONIST'; NULL for activities)
+    - ``target_source`` (str): Data provenance - one of:
+        
+        - ``DRUG_MECHANISM``: From parent's mechanism table (highest confidence)
+        - ``DRUG_MECHANISM_CHILD``: Inherited from child molecule's mechanism
+        - ``ACTIVITIES``: Derived from bioassay activity data (lower confidence)
+    
     :rtype: pandas.DataFrame
     
-    .. note::
-       All child molecules (salts, formulations) are converted to their parent compound.
-       Indications are aggregated from both parent and all children.
+    **Examples**
+    
+    Basic usage - retrieve all molecules from ChEMBL v36::
+    
+    >>> from alethiotx.artemis.chembl import molecules
+    >>> df = molecules(version='36', top_n_activities=1)
+    >>> print(f"{len(df)} records, {df['chembl_id'].nunique()} unique molecules")
+    >>> print(df[['chembl_id', 'pref_name', 'mesh_heading', 'target_gene_name']].head())
+    
+    Filter to specific disease and approved drugs only::
+    
+    >>> df = molecules(version='36')
+    >>> lung_cancer = df[df['mesh_heading'] == 'Lung Neoplasms']
+    >>> approved = lung_cancer[lung_cancer['phase'] == 4]
+    >>> print(approved[['pref_name', 'target_gene_name']].drop_duplicates())
+    
+    Exclude activity-based targets (mechanism data only)::
+    
+    >>> df = molecules(version='36', top_n_activities=0)
+    >>> print(f"Mechanisms only: {df['target_source'].value_counts()}")
+    
+    Analyze recent trials (last 6 years)::
+    
+    >>> from datetime import datetime
+    >>> df = molecules(version='36')
+    >>> current_year = datetime.now().year
+    >>> recent = df[df['trial_year'] >= current_year - 6]
+    >>> print(f"Recent trials: {len(recent)} records")
     
     .. note::
-       Mechanisms are assigned at the parent level and apply to all indications.
-       If a parent has no mechanism but children do, the child's mechanism is inherited.
+        **Parent-Child Normalization**: All molecular forms (salts like 'aspirin sodium',
+        formulations like 'aspirin tablet') are normalized to their parent compound ('aspirin').
+        This ensures consistent target mapping and prevents double-counting.
     
     .. note::
-       Clinical trial IDs containing multiple comma-separated values are exploded into separate rows.
+        **Mechanism-Indication Independence**: A molecule's targets are the same across all its
+        indications. For example, if aspirin targets COX1/COX2, these targets apply whether the
+        indication is 'Pain' or 'Cardiovascular Disease'. This reflects biological reality - a
+        drug's mechanism doesn't change based on what it's prescribed for.
+    
+    .. note::
+        **Clinical Trial ID Explosion**: When a molecule has multiple comma-separated trial IDs
+        (e.g., 'NCT001,NCT002'), they are exploded into separate rows. This enables per-trial
+        analysis and proper trial counting.
+    
+    .. warning::
+        **Data Volume**: ChEMBL v36 contains hundreds of thousands of molecule-target relationships.
+        Full queries may take several minutes and return large DataFrames (>100K rows). Consider
+        filtering by version, phase, or disease after loading to reduce memory usage.
+    
+    .. warning::
+        **Activity-Based Targets**: Targets from the ``ACTIVITIES`` table (``target_source='ACTIVITIES'``)
+        have lower confidence than mechanism-based targets. They represent bioassay activity but may
+        not reflect clinical mechanisms. Set ``top_n_activities=0`` to exclude these if you need
+        high-confidence mechanisms only.
+    
+    .. warning::
+        **Requires chembl-downloader**: This function requires the ``chembl-downloader`` package
+        to be installed. Install via: ``pip install chembl-downloader``
+    
+    .. seealso::
+        - :func:`infer_nct_year`: Used internally to estimate trial registration years
+        - ChEMBL Documentation: https://chembl.gitbook.io/chembl-interface-documentation/
+        - ClinicalTrials.gov: https://clinicaltrials.gov/
+
     """
     
     print("Step 1: Getting all parent molecules with their children's indications...")
