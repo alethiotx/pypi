@@ -39,7 +39,9 @@ def lookup_drug_family_representation(chembl: DataFrame) -> DataFrame:
    :param chembl: ChEMBL molecule data containing drug-target-indication relationships.
                   Must include columns: ``chembl_id``, ``target_gene_name``, ``mesh_heading``
    :type chembl: DataFrame
-   :return: Lookup table with one row per drug-disease-family combination. **Columns:**
+   :return: Lookup table with one row per drug-disease-family combination. 
+   
+   **Columns:**
       
       - ``drug_chembl_id`` (str): ChEMBL identifier for the drug (e.g., 'CHEMBL123')
       - ``mesh_heading`` (str): MeSH disease term (e.g., 'Lung Neoplasms')
@@ -483,37 +485,41 @@ def compute(mesh_headings: list, chembl_version: str = '36', trials_only_last_n_
    biasing results toward that family. With filtering (default), only 1 RTK representative is kept,
    producing unbiased scores that better reflect biological diversity.
    
-   :param mesh_headings: List of MeSH disease headings to analyze. Standard MeSH terms like::
-                         - 'Breast Neoplasms' (breast cancer)
-                         - 'Lung Neoplasms' (lung cancer)
-                         - 'Diabetes Mellitus, Type 2' (type 2 diabetes)
-                         - 'Cardiovascular Diseases' (heart disease)
-                         
-                         Each heading is automatically expanded to include all MeSH descendant terms.
-                         Use exact MeSH terminology for best results.
+   :param mesh_headings: List of MeSH disease headings to analyze. Standard MeSH terms like
+   - 'Breast Neoplasms' (breast cancer)
+   - 'Lung Neoplasms' (lung cancer)
+   - 'Diabetes Mellitus, Type 2' (type 2 diabetes)
+   - 'Cardiovascular Diseases' (heart disease)
+   
+   Each heading is automatically expanded to include all MeSH descendant terms.
+   Use exact MeSH terminology for best results.
    :type mesh_headings: list[str]
-   :param chembl_version: ChEMBL database version to use. Versions correspond to data release dates::
-                          - '36' (default): Data through 2024
-                          - '35': Data through 2023
-                          
-                          See https://www.ebi.ac.uk/chembl/ for version details.
+
+   :param chembl_version: ChEMBL database version to use. Versions correspond to data release dates
+   - '36' (default): Data through 2024
+   - '35': Data through 2023
+   
+   See https://www.ebi.ac.uk/chembl/ for version details.
+   
    :type chembl_version: str, optional
-   :param trials_only_last_n_years: Temporal filter for recent trials only. If provided::
-                                    - Filters to trials registered in last N years
-                                    - Year inferred from ClinicalTrials.gov NCT IDs
-                                    - Useful for identifying emerging targets
-                                    
-                                    Examples:
-                                    - ``6``: Last 6 years (captures recent development)
-                                    - ``10``: Last decade
-                                    - ``None`` (default): All historical trials
+
+   :param trials_only_last_n_years: Temporal filter for recent trials only. If provided
+   - Filters to trials registered in last N years
+   - Year inferred from ClinicalTrials.gov NCT IDs
+   - Useful for identifying emerging targets
+   
+   Examples:
+   - ``6``: Last 6 years (captures recent development)
+   - ``10``: Last decade
+   - ``None`` (default): All historical trials
    :type trials_only_last_n_years: int or None, optional
-   :param filter_families: Whether to apply gene family filtering to reduce bias::
+
+   :param filter_families: Whether to apply gene family filtering to reduce bias
                            
-                           - ``True`` (default): Filter over-represented families
-                             (recommended for unbiased target prioritization)
-                           - ``False``: Include all targets without filtering
-                             (use when family representation is biologically relevant)
+   - ``True`` (default): Filter over-represented families
+      (recommended for unbiased target prioritization)
+   - ``False``: Include all targets without filtering
+      (use when family representation is biologically relevant)
    :type filter_families: bool, optional
    :return: Dictionary mapping each MeSH heading to its results DataFrame.
             
@@ -893,15 +899,18 @@ def load(date = '2025-12-08'):
    :type date: str, optional
    :return: Tuple of 7 DataFrames containing clinical scores for each disease. Each DataFrame has:
             
-            **Columns:**
-            
-            - ``Target Gene`` (str): HGNC gene symbol
-            - ``phase_0`` through ``phase_4`` (int): Count of trials in each phase
-            - ``Phase Score`` (int): Sum of trial phases (0-3)
-            - ``approved`` (bool): Whether target has any approved (phase 4) drug
-            - ``Clinical Score`` (int): Total validation score (Phase Score + 20 if approved)
-            
-            **Order:** (breast, lung, prostate, melanoma, bowel, diabetes, cardiovascular)
+   **Columns:**
+   
+   - ``Target Gene`` (str): HGNC gene symbol
+   - ``phase_0`` through ``phase_4`` (int): Count of trials in each phase
+   - ``Phase Score`` (int): Sum of trial phases (0-3)
+   - ``approved`` (bool): Whether target has any approved (phase 4) drug
+   - ``Clinical Score`` (int): Total validation score (Phase Score + 20 if approved)
+   
+   **Order:** 
+   
+   (breast, lung, prostate, melanoma, bowel, diabetes, cardiovascular)
+
    :rtype: tuple[DataFrame, DataFrame, DataFrame, DataFrame, DataFrame, DataFrame, DataFrame]
    :raises FileNotFoundError: If CSV files don't exist at the specified S3 paths for the given date
    :raises ValueError: If CSV files are malformed or missing required columns
