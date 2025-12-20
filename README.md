@@ -256,7 +256,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 - Public knowledge graph providers (Hetionet, BioKG, OpenBioLink, PrimeKG)
 - PyKEEN, scikit-learn, and Nextflow communities
 - ChEMBL and MeSH data sources
-- Code cleaned up and improved by GitHub Copilot (Claude Sonnet 4.5)
+- Portions of this codebase were generated, refactored, and/or cleaned using GitHub Copilot (Claude Sonnet 4.5). The authors reviewed, modified, and validated all AI-assisted code. Responsibility for the correctness, performance, and reproducibility of the code rests entirely with the authors. 
 
 ---
 
