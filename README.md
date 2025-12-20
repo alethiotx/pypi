@@ -251,6 +251,13 @@ Email: vlad.kiselev@alethiomics.com
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+## Acknowledgements
+
+- Public knowledge graph providers (Hetionet, BioKG, OpenBioLink, PrimeKG)
+- PyKEEN, scikit-learn, and Nextflow communities
+- ChEMBL and MeSH data sources
+- Code cleaned up and improved by GitHub Copilot (Claude Sonnet 4.5)
+
 ---
 
 **Current Focus:** Artemis - Enabling accessible and scalable drug target discovery through public knowledge graphs.  
