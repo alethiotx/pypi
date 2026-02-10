@@ -20,4 +20,4 @@ Github Repository
 """
 
 __author__ = """Vladimir Kiselev"""
-__email__ = 'vlad.kiselev@alethiomics.com'
+__email__ = 'vlad.kiselev@alethiotx.com'
