@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alethiotx"
-version = "2.1.4"
+version = "2.1.5"
 description = "Alethio Therapeutics Python Toolkit"
 readme = "README.md"
 license = {file = "LICENSE"}
-authors = [{name = "Vladimir Kiselev", email = "vlad.kiselev@alethiomics.com"}]
+authors = [{name = "Vladimir Kiselev", email = "vlad.kiselev@alethiotx.com"}]
 keywords = ["alethiotx", "artemis"]
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -20,6 +20,8 @@ dependencies = [
     "requests",
     "scikit-learn",
     "pandas",
+    "fsspec",
+    "s3fs",
     "numpy",
     "matplotlib",
     "setuptools",
