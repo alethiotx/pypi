@@ -15,7 +15,7 @@
 
 The Artemis module enables accessible and scalable drug target prioritization by integrating drug molecule and target data from ChEMBL (including clinical trial phases and approvals), MeSH disease hierarchies, HGNC gene families, pathway information from GeneShot, and machine learning pipelines. It leverages public knowledge graphs to prioritize therapeutic targets across multiple disease areas.
 
-##### Artemis Module Features
+### Artemis Module Features
 
 - **ChEMBL Integration**: Query and process ChEMBL bioactive molecule database with clinical trial information and automatic parent molecule normalization
 - **MeSH Hierarchy**: Retrieve MeSH disease trees and descendants for comprehensive disease coverage
@@ -138,7 +138,7 @@ plot_pg.plot()
 
 The CellProfiler module provides small, memory-efficient utilities for post-processing CellProfiler pipeline outputs. It offers helpers to add TIF metadata (from an Image_enriched.csv produced by the pipeline) to large CellProfiler CSVs without loading everything into memory.
 
-- `add_metadata(s3_path, csv_name, columns=None, output_dir=None)` — Add metadata columns from `Image_enriched.csv` to a target CSV and write `<stem>_enriched.csv` locally.
+- `add_metadata(s3_path, csv_name, columns=None, output_dir=None)` — Join `FileName_*` columns to add metadata from `Image_enriched.csv` to a target CSV. Returns a pandas DataFrame; optionally writes `<stem>_enriched.csv` to disk.
 - `list_metadata_columns(s3_path)` — List available metadata columns present in `Image_enriched.csv`.
 
 Quick example:
@@ -149,11 +149,16 @@ from alethiotx.cellprofiler import add_metadata, list_metadata_columns
 # List available metadata columns
 cols = list_metadata_columns("s3://example-bucket/my-experiment/")
 
-# Add all metadata columns to Cell.csv — returns a pandas DataFrame
-df = add_metadata("s3://example-bucket/my-experiment/", "Cell.csv")
+# Add all metadata columns — returns a pandas DataFrame
+df = add_metadata("s3://example-bucket/my-experiment/", "Cells.csv")
 
-# To also write the merged CSV to disk, pass `output_dir`
-# df = add_metadata("s3://example-bucket/my-experiment/", "Cell.csv", output_dir="~/Downloads")
+# Add specific columns and also write the CSV to disk
+df = add_metadata(
+    "s3://example-bucket/my-experiment/",
+    "Cells.csv",
+    columns=["PlateID", "Well", "Site", "Z_Step"],
+    output_dir=".",
+)
 ```
 
 ## Supported Disease Indications (Artemis Module)

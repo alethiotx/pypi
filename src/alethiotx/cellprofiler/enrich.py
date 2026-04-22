@@ -1,17 +1,18 @@
 """
 Enrich CellProfiler CSVs with TIF metadata from Image_enriched.csv.
 
-Downloads files from S3, streams the merge row-by-row (~12 MB memory),
-and writes the enriched CSV locally.
+Downloads files from S3 (or reads locally), joins by FileName columns,
+and returns a pandas DataFrame.  Optionally writes to disk.
 """
 
 import csv
+import os
 import subprocess
 import tempfile
-import io
-import pandas as pd
 import time
 from pathlib import Path
+
+import pandas as pd
 
 
 def _s3_download(s3_uri, local_path):
@@ -30,7 +31,7 @@ def _s3_download(s3_uri, local_path):
         raise RuntimeError(f"Failed to download {s3_uri}: {result.stderr.strip()}")
 
 
-def list_metadata_columns(s3_path):
+def list_metadata_columns(s3_path='.'):
     """List available metadata columns in Image_enriched.csv.
 
     Downloads only ``Image_enriched.csv`` from the S3 output directory
@@ -48,51 +49,57 @@ def list_metadata_columns(s3_path):
     >>> print(cols[:5])
     ['PlateID', 'Well', 'Site', 'Z_Step', 'z_position']
     """
-    s3_base = s3_path.rstrip("/")
+    base = s3_path.rstrip("/")
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        ie_local = Path(tmpdir) / "Image_enriched.csv"
-        _s3_download(f"{s3_base}/Image_enriched.csv", ie_local)
-
+    # Support local directories as well as S3 URIs
+    if base.startswith("s3://"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ie_local = Path(tmpdir) / "Image_enriched.csv"
+            _s3_download(f"{base}/Image_enriched.csv", ie_local)
+            with open(ie_local) as f:
+                header = csv.DictReader(f).fieldnames
+    else:
+        ie_local = Path(base) / "Image_enriched.csv"
         with open(ie_local) as f:
             header = csv.DictReader(f).fieldnames
 
     return [c for c in header if c != "ImageNumber"]
 
 
-def add_metadata(s3_path, csv_name, columns=None, output_dir=None):
+def add_metadata(s3_path='.', csv_name='Cells.csv', columns=None, output_dir=None):
     """Add TIF metadata to a CellProfiler CSV.
 
     Downloads ``csv_name`` and ``Image_enriched.csv`` from the S3 output
-    directory, joins them on ``ImageNumber``, and writes
-    ``<stem>_enriched.csv`` locally.
+    directory (or reads from a local directory), joins them by
+    ``FileName_*`` columns, and returns a pandas DataFrame.
 
-    The merge streams ``csv_name`` row-by-row so memory usage stays at
-    ~12 MB regardless of file size. No pandas required.
+    ``ImageNumber`` cannot be used as a join key because CellProfiler
+    parallel tasks each start numbering from 1, producing duplicates
+    after ``merge_csv.py`` concatenates them.
 
-    :param s3_path: S3 URI of the CellProfiler output directory
-        (e.g. ``s3://example-bucket/my-experiment/``)
+    :param s3_path: S3 URI or local path of the CellProfiler output
+        directory (e.g. ``s3://example-bucket/my-experiment/`` or ``.``).
     :type s3_path: str
     :param csv_name: Name of the CSV to enrich
-        (e.g. ``Cell.csv``, ``Nucleus.csv``, ``Cytoplasm.csv``)
+        (e.g. ``Cells.csv``, ``Nucleus.csv``, ``Cytoplasm.csv``)
     :type csv_name: str
-    :param columns: Specific columns to add from Image_enriched.csv.
-        If ``None``, all columns except ``ImageNumber`` are added.
+    :param columns: Specific metadata columns to add from
+        Image_enriched.csv.  If ``None``, all metadata columns are added
+        (excluding ``ImageNumber``, ``FileName_*``, and ``PathName_*``
+        which already exist in the target CSV).
     :type columns: list[str] or None
-    :param output_dir: Directory to write the enriched CSV. If ``None`` (the
-        default), the merged data is NOT written to disk and only a
-        `pandas.DataFrame` is returned. To write the merged CSV, pass a
-        directory path.
+    :param output_dir: Directory to write ``<stem>_enriched.csv``.
+        If ``None`` (the default), nothing is written to disk.
     :type output_dir: str or Path or None
-    :return: A pandas `DataFrame` containing the enriched CSV data.
+    :return: The enriched data.
     :rtype: pandas.DataFrame
 
     **Examples**
 
-    Add all metadata columns to ``Cell.csv`` and receive a pandas ``DataFrame``::
+    Return a DataFrame without writing to disk::
 
         >>> from alethiotx.cellprofiler import add_metadata
-        >>> df = add_metadata("s3://example-bucket/my-experiment/", "Cell.csv")
+        >>> df = add_metadata("s3://example-bucket/my-experiment/", "Cells.csv")
         >>> print(df.shape)
         (1000, 250)
 
@@ -104,39 +111,53 @@ def add_metadata(s3_path, csv_name, columns=None, output_dir=None):
         ...     columns=["PlateID", "Well", "Site", "Z_Step"],
         ... )
 
-    Write to a specific directory (also writes the merged CSV to disk)::
+    Also write the merged CSV to disk::
 
         >>> df = add_metadata(
         ...     "s3://example-bucket/my-experiment/",
-        ...     "Cell.csv",
+        ...     "Cells.csv",
         ...     output_dir="~/Downloads",
         ... )
     """
     s3_base = s3_path.rstrip("/")
     stem = Path(csv_name).stem
 
-    # Only prepare an output path if the user provided `output_dir`.
-    if output_dir is None:
-        output_path = None
-    else:
+    if output_dir is not None:
         output_dir = Path(output_dir).expanduser()
         output_path = output_dir / f"{stem}_enriched.csv"
+    else:
+        output_path = None
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         ie_local = tmpdir / "Image_enriched.csv"
         csv_local = tmpdir / csv_name
 
-        # Download Image_enriched.csv
-        print(f"Downloading {s3_base}/Image_enriched.csv ...")
-        _s3_download(f"{s3_base}/Image_enriched.csv", ie_local)
+        # Download from S3 or resolve local paths
+        if s3_base.startswith("s3://"):
+            print(f"Downloading {s3_base}/Image_enriched.csv ...")
+            _s3_download(f"{s3_base}/Image_enriched.csv", ie_local)
+            print(f"Downloading {s3_base}/{csv_name} ...")
+            _s3_download(f"{s3_base}/{csv_name}", csv_local)
+        else:
+            local_base = Path(s3_base)
+            ie_local = local_base / "Image_enriched.csv"
+            csv_local = local_base / csv_name
 
-        # Read header and resolve columns
+        # Read Image_enriched header
         with open(ie_local) as f:
             ie_header = csv.DictReader(f).fieldnames
 
-        available_cols = [c for c in ie_header if c != "ImageNumber"]
+        # FileName columns are the join key (ImageNumber is unreliable
+        # because parallel CellProfiler tasks each start from 1)
+        fname_cols = [c for c in ie_header if c.startswith("FileName_")]
+        if not fname_cols:
+            raise ValueError(
+                "Image_enriched.csv must contain FileName_* columns for joining.\n"
+                f"Available columns: {ie_header}"
+            )
 
+        # Determine which metadata columns to add
         if columns is not None:
             missing = [c for c in columns if c not in ie_header]
             if missing:
@@ -146,48 +167,60 @@ def add_metadata(s3_path, csv_name, columns=None, output_dir=None):
                 )
             merge_cols = list(columns)
         else:
-            merge_cols = available_cols
+            # Exclude columns that already exist in the target CSV
+            exclude = {"ImageNumber"} | {
+                c for c in ie_header
+                if c.startswith(("FileName_", "PathName_"))
+            }
+            merge_cols = [c for c in ie_header if c not in exclude]
 
-        # Download the target CSV
-        print(f"Downloading {s3_base}/{csv_name} ...")
-        _s3_download(f"{s3_base}/{csv_name}", csv_local)
-
-        # Build lookup from Image_enriched (small — one row per image set)
+        # Build lookup: filename tuple → metadata dict
         lookup = {}
         with open(ie_local) as f:
             for row in csv.DictReader(f):
-                lookup[row["ImageNumber"]] = {k: row[k] for k in merge_cols}
+                key = tuple(row.get(k, "") for k in fname_cols)
+                lookup[key] = {k: row[k] for k in merge_cols}
 
         empty_meta = {k: "" for k in merge_cols}
 
-        # Stream CSV row-by-row, append metadata, write output
+        # Stream CSV row-by-row: write to output (or temp) file
         t0 = time.time()
         n = 0
-        with open(csv_local) as fin:
-            reader = csv.DictReader(fin)
-            fieldnames = reader.fieldnames + merge_cols
 
-            buf = io.StringIO()
-            writer = csv.DictWriter(buf, fieldnames=fieldnames)
+        # Write to final destination or a temp file
+        write_path = output_path or Path(tmpdir) / f"{stem}_enriched.csv"
+
+        with open(csv_local) as fin, \
+             open(write_path, "w", newline="") as fout:
+            reader = csv.DictReader(fin)
+
+            # Verify target CSV has the same FileName columns
+            target_fname_cols = {c for c in reader.fieldnames
+                                 if c.startswith("FileName_")}
+            missing_fnames = set(fname_cols) - target_fname_cols
+            if missing_fnames:
+                raise ValueError(
+                    f"{csv_name} is missing FileName columns needed for "
+                    f"join: {sorted(missing_fnames)}"
+                )
+
+            writer = csv.DictWriter(
+                fout, fieldnames=reader.fieldnames + merge_cols,
+            )
             writer.writeheader()
+
             for row in reader:
-                row.update(lookup.get(row["ImageNumber"], empty_meta))
+                key = tuple(row.get(k, "") for k in fname_cols)
+                row.update(lookup.get(key, empty_meta))
                 writer.writerow(row)
                 n += 1
 
-            csv_text = buf.getvalue()
-            buf.close()
+        elapsed = time.time() - t0
+        print(f"Merged {n:,} rows x {len(merge_cols)} metadata columns "
+              f"in {elapsed:.1f}s")
 
-            # Optionally write the merged CSV to disk if output_dir was provided
-            if output_path is not None:
-                with open(output_path, "w", newline="") as fout:
-                    fout.write(csv_text)
-
-    elapsed = time.time() - t0
-    print(f"Merged {n:,} rows x {len(merge_cols)} metadata columns in {elapsed:.1f}s")
-
-    # Convert merged CSV text into a pandas DataFrame and return
-    df = pd.read_csv(io.StringIO(csv_text))
+        # Read back as DataFrame
+        df = pd.read_csv(write_path)
 
     if output_path is not None:
         size_mb = output_path.stat().st_size / 1024 / 1024
