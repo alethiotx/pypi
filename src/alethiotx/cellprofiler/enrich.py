@@ -79,8 +79,10 @@ def add_metadata(s3_path, csv_name, columns=None, output_dir=None):
     :param columns: Specific columns to add from Image_enriched.csv.
         If ``None``, all columns except ``ImageNumber`` are added.
     :type columns: list[str] or None
-    :param output_dir: Directory to write the enriched CSV.
-        Defaults to the current working directory.
+    :param output_dir: Directory to write the enriched CSV. If ``None`` (the
+        default), the merged data is NOT written to disk and only a
+        `pandas.DataFrame` is returned. To write the merged CSV, pass a
+        directory path.
     :type output_dir: str or Path or None
     :return: A pandas `DataFrame` containing the enriched CSV data.
     :rtype: pandas.DataFrame
@@ -112,8 +114,13 @@ def add_metadata(s3_path, csv_name, columns=None, output_dir=None):
     """
     s3_base = s3_path.rstrip("/")
     stem = Path(csv_name).stem
-    output_dir = Path(output_dir or Path.cwd()).expanduser()
-    output_file = output_dir / f"{stem}_enriched.csv"
+
+    # Only prepare an output path if the user provided `output_dir`.
+    if output_dir is None:
+        output_path = None
+    else:
+        output_dir = Path(output_dir).expanduser()
+        output_path = output_dir / f"{stem}_enriched.csv"
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -172,8 +179,8 @@ def add_metadata(s3_path, csv_name, columns=None, output_dir=None):
             buf.close()
 
             # Optionally write the merged CSV to disk if output_dir was provided
-            if output_dir is not None:
-                with open(output_file, "w", newline="") as fout:
+            if output_path is not None:
+                with open(output_path, "w", newline="") as fout:
                     fout.write(csv_text)
 
     elapsed = time.time() - t0
@@ -182,8 +189,8 @@ def add_metadata(s3_path, csv_name, columns=None, output_dir=None):
     # Convert merged CSV text into a pandas DataFrame and return
     df = pd.read_csv(io.StringIO(csv_text))
 
-    if output_dir is not None:
-        size_mb = output_file.stat().st_size / 1024 / 1024
-        print(f"Saved to: {output_file} ({size_mb:.1f} MB)")
+    if output_path is not None:
+        size_mb = output_path.stat().st_size / 1024 / 1024
+        print(f"Saved to: {output_path} ({size_mb:.1f} MB)")
 
     return df
