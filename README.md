@@ -149,8 +149,11 @@ from alethiotx.cellprofiler import add_metadata, list_metadata_columns
 # List available metadata columns
 cols = list_metadata_columns("s3://example-bucket/my-experiment/")
 
-# Add all metadata columns to Cell.csv (writes Cell_enriched.csv)
-add_metadata("s3://example-bucket/my-experiment/", "Cell.csv")
+# Add all metadata columns to Cell.csv — returns a pandas DataFrame
+df = add_metadata("s3://example-bucket/my-experiment/", "Cell.csv")
+
+# To also write the merged CSV to disk, pass `output_dir`
+# df = add_metadata("s3://example-bucket/my-experiment/", "Cell.csv", output_dir="~/Downloads")
 ```
 
 ## Supported Disease Indications (Artemis Module)

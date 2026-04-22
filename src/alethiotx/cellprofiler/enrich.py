@@ -8,6 +8,8 @@ and writes the enriched CSV locally.
 import csv
 import subprocess
 import tempfile
+import io
+import pandas as pd
 import time
 from pathlib import Path
 
@@ -80,29 +82,29 @@ def add_metadata(s3_path, csv_name, columns=None, output_dir=None):
     :param output_dir: Directory to write the enriched CSV.
         Defaults to the current working directory.
     :type output_dir: str or Path or None
-    :return: Path to the enriched CSV file
-    :rtype: Path
+    :return: A pandas `DataFrame` containing the enriched CSV data.
+    :rtype: pandas.DataFrame
 
     **Examples**
 
-    Add all metadata columns to ``Cell.csv``::
+    Add all metadata columns to ``Cell.csv`` and receive a pandas ``DataFrame``::
 
         >>> from alethiotx.cellprofiler import add_metadata
-        >>> out = add_metadata("s3://example-bucket/my-experiment/", "Cell.csv")
-        >>> print(out)
-        /Users/you/Cell_enriched.csv
+        >>> df = add_metadata("s3://example-bucket/my-experiment/", "Cell.csv")
+        >>> print(df.shape)
+        (1000, 250)
 
     Add specific columns only::
 
-        >>> out = add_metadata(
+        >>> df = add_metadata(
         ...     "s3://example-bucket/my-experiment/",
         ...     "Nucleus.csv",
         ...     columns=["PlateID", "Well", "Site", "Z_Step"],
         ... )
 
-    Write to a specific directory::
+    Write to a specific directory (also writes the merged CSV to disk)::
 
-        >>> out = add_metadata(
+        >>> df = add_metadata(
         ...     "s3://example-bucket/my-experiment/",
         ...     "Cell.csv",
         ...     output_dir="~/Downloads",
@@ -154,18 +156,34 @@ def add_metadata(s3_path, csv_name, columns=None, output_dir=None):
         # Stream CSV row-by-row, append metadata, write output
         t0 = time.time()
         n = 0
-        with open(csv_local) as fin, open(output_file, "w", newline="") as fout:
+        with open(csv_local) as fin:
             reader = csv.DictReader(fin)
-            writer = csv.DictWriter(fout, fieldnames=reader.fieldnames + merge_cols)
+            fieldnames = reader.fieldnames + merge_cols
+
+            buf = io.StringIO()
+            writer = csv.DictWriter(buf, fieldnames=fieldnames)
             writer.writeheader()
             for row in reader:
                 row.update(lookup.get(row["ImageNumber"], empty_meta))
                 writer.writerow(row)
                 n += 1
 
-    elapsed = time.time() - t0
-    size_mb = output_file.stat().st_size / 1024 / 1024
-    print(f"Merged {n:,} rows x {len(merge_cols)} metadata columns in {elapsed:.1f}s")
-    print(f"Saved to: {output_file} ({size_mb:.1f} MB)")
+            csv_text = buf.getvalue()
+            buf.close()
 
-    return output_file
+            # Optionally write the merged CSV to disk if output_dir was provided
+            if output_dir is not None:
+                with open(output_file, "w", newline="") as fout:
+                    fout.write(csv_text)
+
+    elapsed = time.time() - t0
+    print(f"Merged {n:,} rows x {len(merge_cols)} metadata columns in {elapsed:.1f}s")
+
+    # Convert merged CSV text into a pandas DataFrame and return
+    df = pd.read_csv(io.StringIO(csv_text))
+
+    if output_dir is not None:
+        size_mb = output_file.stat().st_size / 1024 / 1024
+        print(f"Saved to: {output_file} ({size_mb:.1f} MB)")
+
+    return df
