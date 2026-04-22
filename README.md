@@ -15,7 +15,7 @@
 
 The Artemis module enables accessible and scalable drug target prioritization by integrating drug molecule and target data from ChEMBL (including clinical trial phases and approvals), MeSH disease hierarchies, HGNC gene families, pathway information from GeneShot, and machine learning pipelines. It leverages public knowledge graphs to prioritize therapeutic targets across multiple disease areas.
 
-### Artemis Module Features
+##### Artemis Module Features
 
 - **ChEMBL Integration**: Query and process ChEMBL bioactive molecule database with clinical trial information and automatic parent molecule normalization
 - **MeSH Hierarchy**: Retrieve MeSH disease trees and descendants for comprehensive disease coverage
@@ -26,9 +26,9 @@ The Artemis module enables accessible and scalable drug target prioritization by
 - **UpSet Plots**: Visualize gene set intersections across multiple diseases
 - **Multi-Disease Support**: Pre-configured for breast, lung, prostate, melanoma, bowel cancer, diabetes, and cardiovascular disease
 
-### Future Modules
+### CellProfiler Module (`alethiotx.cellprofiler`)
 
-Additional modules for various aspects of drug discovery and therapeutic research are planned for future releases. Stay tuned!
+The CellProfiler module provides small, memory-efficient utilities for post-processing CellProfiler pipeline outputs. It offers helpers to add TIF metadata (from an Image_enriched.csv produced by the pipeline) to large CellProfiler CSVs without loading everything into memory.
 
 ## Installation
 
@@ -37,8 +37,6 @@ pip install alethiotx
 ```
 
 ## Quick Start
-
-> **Note:** The examples below demonstrate the **Artemis** module functionality. As new modules are added to the package, they will have their own usage examples.
 
 ### 1. Query ChEMBL and Compute Clinical Scores
 
@@ -136,6 +134,25 @@ plot_pg = create(upset_data_pg, min_subset_size=10)
 plot_pg.plot()
 ```
 
+### 6. Merge CellProfiler output with TIFF metadata (CellProfiler Module)
+
+The CellProfiler module provides small, memory-efficient utilities for post-processing CellProfiler pipeline outputs. It offers helpers to add TIF metadata (from an Image_enriched.csv produced by the pipeline) to large CellProfiler CSVs without loading everything into memory.
+
+- `add_metadata(s3_path, csv_name, columns=None, output_dir=None)` — Add metadata columns from `Image_enriched.csv` to a target CSV and write `<stem>_enriched.csv` locally.
+- `list_metadata_columns(s3_path)` — List available metadata columns present in `Image_enriched.csv`.
+
+Quick example:
+
+```python
+from alethiotx.cellprofiler import add_metadata, list_metadata_columns
+
+# List available metadata columns
+cols = list_metadata_columns("s3://example-bucket/my-experiment/")
+
+# Add all metadata columns to Cell.csv (writes Cell_enriched.csv)
+add_metadata("s3://example-bucket/my-experiment/", "Cell.csv")
+```
+
 ## Supported Disease Indications (Artemis Module)
 
 The Artemis module includes built-in pre-computed data for:
@@ -149,53 +166,6 @@ The Artemis module includes built-in pre-computed data for:
 - **Cardiovascular Disease**
 
 The module supports querying any disease with MeSH headings via the `compute()` function.
-
-## Artemis Module API Reference
-
-### ChEMBL Module (`alethiotx.artemis.chembl`)
-
-- `molecules(version, top_n_activities)` - Query ChEMBL for parent molecules with clinical trial data
-- `infer_nct_year(nct_id)` - Infer registration year from ClinicalTrials.gov NCT identifier
-
-### Clinical Scores Module (`alethiotx.artemis.clinical`)
-
-- `compute(mesh_headings, chembl_version, trials_only_last_n_years, filter_families)` - Compute clinical validation scores for drug targets
-- `load(date)` - Load pre-computed clinical scores from S3
-- `lookup_drug_family_representation(chembl)` - Create drug-disease-family representation lookup table
-- `filter_overrepresented_families(targets_df, drug_chembl_id, mesh_heading, lookup_table)` - Filter over-represented gene families
-- `unique(scores, overlap, common_genes)` - Remove overlapping genes from clinical scores
-- `approved(scores)` - Filter to include only approved targets
-- `all_targets(scores)` - Extract all unique target genes from score lists
-
-### Pathway Genes Module (`alethiotx.artemis.pathway`)
-
-- `get(search, rif)` - Query Ma'ayan Lab's GeneShot API for disease-associated genes
-- `load(date, n)` - Load pre-computed pathway genes from S3
-- `unique(genes, overlap, common_genes)` - Remove overlapping genes from pathway lists
-
-### MeSH Module (`alethiotx.artemis.mesh`)
-
-- `tree(s3_base, url_base, file_base)` - Retrieve MeSH tree structure
-- `descendants(heading, s3_base, file_base, url_base)` - Get all descendant MeSH headings
-
-### HGNC Module (`alethiotx.artemis.hgnc`)
-
-- `download(gene_has_family_url, family_url, hgnc_complete_url)` - Download HGNC gene family data
-- `process(gene_has_family, family, hgnc_data)` - Process HGNC data and create gene-family mappings
-
-### Machine Learning Module (`alethiotx.artemis.cv`)
-
-- `prepare(X, y, pathway_genes, known_targets, term_num, bins, rand_seed)` - Prepare datasets for ML model training
-- `run(X, y, n_splits, n_iterations, classifier, scoring)` - Cross-validation pipeline with configurable classifiers
-
-### Visualization Module (`alethiotx.artemis.upset`)
-
-- `prepare(breast, lung, prostate, melanoma, bowel, diabetes, cardiovascular, mode)` - Prepare data for UpSet plot
-- `create(indications, min_subset_size)` - Create UpSet plots for visualizing gene set intersections
-
-### Utilities (`alethiotx.artemis.utils`)
-
-- `find_overlapping_genes(genes, overlap, common_genes)` - Find genes that overlap across multiple gene lists
 
 ## Data Storage (Artemis Module)
 
