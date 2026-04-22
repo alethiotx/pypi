@@ -42,7 +42,7 @@ def list_metadata_columns(s3_path):
     **Example**
 
     >>> from alethiotx.cellprofiler import list_metadata_columns
-    >>> cols = list_metadata_columns("s3://altmx-cellprofiler-results/my-experiment/")
+    >>> cols = list_metadata_columns("s3://example-bucket/my-experiment/")
     >>> print(cols[:5])
     ['PlateID', 'Well', 'Site', 'Z_Step', 'z_position']
     """
@@ -69,7 +69,7 @@ def add_metadata(s3_path, csv_name, columns=None, output_dir=None):
     ~12 MB regardless of file size. No pandas required.
 
     :param s3_path: S3 URI of the CellProfiler output directory
-        (e.g. ``s3://altmx-cellprofiler-results/my-experiment/``)
+        (e.g. ``s3://example-bucket/my-experiment/``)
     :type s3_path: str
     :param csv_name: Name of the CSV to enrich
         (e.g. ``Cell.csv``, ``Nucleus.csv``, ``Cytoplasm.csv``)
@@ -88,14 +88,14 @@ def add_metadata(s3_path, csv_name, columns=None, output_dir=None):
     Add all metadata columns to ``Cell.csv``::
 
         >>> from alethiotx.cellprofiler import add_metadata
-        >>> out = add_metadata("s3://altmx-cellprofiler-results/my-experiment/", "Cell.csv")
+        >>> out = add_metadata("s3://example-bucket/my-experiment/", "Cell.csv")
         >>> print(out)
         /Users/you/Cell_enriched.csv
 
     Add specific columns only::
 
         >>> out = add_metadata(
-        ...     "s3://altmx-cellprofiler-results/my-experiment/",
+        ...     "s3://example-bucket/my-experiment/",
         ...     "Nucleus.csv",
         ...     columns=["PlateID", "Well", "Site", "Z_Step"],
         ... )
@@ -103,7 +103,7 @@ def add_metadata(s3_path, csv_name, columns=None, output_dir=None):
     Write to a specific directory::
 
         >>> out = add_metadata(
-        ...     "s3://altmx-cellprofiler-results/my-experiment/",
+        ...     "s3://example-bucket/my-experiment/",
         ...     "Cell.csv",
         ...     output_dir="~/Downloads",
         ... )
