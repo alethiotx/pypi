@@ -84,9 +84,8 @@ def add_metadata(s3_path='.', csv_name='Cells.csv', columns=None, output_dir=Non
         (e.g. ``Cells.csv``, ``Nucleus.csv``, ``Cytoplasm.csv``)
     :type csv_name: str
     :param columns: Specific metadata columns to add from
-        Image_enriched.csv.  If ``None``, all metadata columns are added
-        (excluding ``ImageNumber``, ``FileName_*``, and ``PathName_*``
-        which already exist in the target CSV).
+        Image_enriched.csv.  If ``None``, all columns are added except
+        ``ImageNumber``, ``FileName_*``, and ``PathName_*``.
     :type columns: list[str] or None
     :param output_dir: Directory to write ``<stem>_enriched.csv``.
         If ``None`` (the default), nothing is written to disk.
