@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alethiotx"
-version = "2.1.5"
+version = "2.1.6"
 description = "Alethio Therapeutics Python Toolkit"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [{name = "Vladimir Kiselev", email = "vlad.kiselev@alethiotx.com"}]
-keywords = ["alethiotx", "artemis"]
+keywords = ["alethiotx", "artemis", "cellprofiler"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: MIT License",
